@@ -1,0 +1,500 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+    CodePipeline CFN Stack for 'cognito-restore-service' micro-service
+
+Parameters:
+  Prefix:
+    Type: String
+    Default: 'cognito-restore'
+  Environment:
+    Type: String
+    Default: 'dev'
+  GitHubOwner:
+    Type: String
+    Default: 'Blueshirt-work'
+  GitHubRepositoryName:
+    Type: String
+    Default: 'test_cognito'
+  RepoName:
+    Type: String
+    Default: 'cognito_restore_test'
+  GitBranch:
+    Type: String
+    Default: 'main'
+  Region:
+    Type: String
+    Default: 'ap-south-1'
+  ResourceStackName:
+    Type: String
+    Default: 'cognito-restore-service-dev-stack'
+  PipelineArtifactBucket:
+    Type: String
+    Default: 'cognito-restore-dev-pipeline-artifactsbucket'
+  CodeStarConnectionArn:
+    Type: String
+    Default: 'arn:aws:codestar-connections:us-east-1:698032826194:connection/0e2ebc7a-a6ba-412c-9237-9b502252421c'
+  Stage:
+    Type: String
+    Default: 'dev'
+  S3Bucket:
+    Type: String
+    Default: 'cognito-backup-bucket-test-s3'
+  S3Key:
+    Type: String
+    Default: 'cognito-users-backup (1).json'
+  UserPoolId:
+    Type: String
+    Default: 'ap-south-1_OpPrIODGO'
+  XrayEnabled:
+    Type: String
+    Default: 'true'
+  Tags:
+    Type: String
+    Default: 'Project=CognitoRestore Service=Serverless'
+  IsS3BucketExists:
+    Default: "false"
+    Type: String
+    AllowedValues: ["true", "false"]
+
+Conditions:
+  IsS3BucketExistsCondition: !Equals [!Ref IsS3BucketExists, "true"]
+
+Resources:
+    #  ____  _            _ _
+    # |  _ \(_)_ __   ___| (_)_ __   ___
+    # | |_) | | '_ \ / _ | | | '_ \ / _ \
+    # |  __/| | |_) |  __| | | | | |  __/
+    # |_|   |_| .__/ \___|_|_|_| |_|\___|
+    #         |_|
+    CPCBS3Bucket:
+      Type: AWS::S3::Bucket
+      Condition: IsS3BucketExistsCondition
+      Properties:
+        BucketName: !Ref PipelineArtifactBucket
+
+    Pipeline:
+      Type: AWS::CodePipeline::Pipeline
+      Properties:
+        Name: !Sub '${RepoName}-${Environment}-pipeline'
+        ArtifactStore:
+            Location: !Sub ${PipelineArtifactBucket}
+            Type: S3
+        RoleArn: !GetAtt CodePipelineExecutionRole.Arn
+        RestartExecutionOnUpdate: true
+        Stages:
+            - Name: Source
+              Actions:
+                - Name: SourceCodeRepo
+                  ActionTypeId:
+                    Category: Source
+                    Owner: AWS
+                    Provider: CodeStarSourceConnection
+                    Version: "1"
+                  Configuration:
+                    ConnectionArn: !Ref CodeStarConnectionArn
+                    FullRepositoryId: !Sub "${GitHubOwner}/${GitHubRepositoryName}"
+                    BranchName: !Ref GitBranch
+                    OutputArtifactFormat: "CODE_ZIP"
+                  OutputArtifacts:
+                      - Name: SourceCodeAsZip
+                  RunOrder: 1
+            - Name: BuildAndPackage
+              Actions:
+                - Name: CodeBuild
+                  ActionTypeId:
+                    Category: Build
+                    Owner: AWS
+                    Provider: CodeBuild
+                    Version: '1'
+                  RunOrder: 1
+                  Configuration:
+                    ProjectName: !Ref CodeBuildProjectBuildAndPackage
+                  InputArtifacts:
+                    - Name: SourceCodeAsZip
+                  OutputArtifacts:
+                    - Name: BuildArtifactAsZip
+            - Name: Deploy
+              Actions:
+                - Name: DeployServerless
+                  ActionTypeId:
+                    Category: Build
+                    Owner: AWS
+                    Provider: CodeBuild
+                    Version: '1'
+                  Configuration:
+                    ProjectName: !Ref CodeBuildProjectDeploy
+                  InputArtifacts:
+                    - Name: BuildArtifactAsZip
+                  RunOrder: 1
+      DependsOn: ECRRepository
+
+    PipelineArtifactsBucketPolicy:
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        Bucket: !Ref PipelineArtifactBucket
+        PolicyDocument:
+          Statement:
+            - Effect: 'Deny'
+              Action: 's3:*'
+              Principal: '*'
+              Resource:
+                - !Sub arn:${AWS::Partition}:s3:::${PipelineArtifactBucket}
+                - !Sub arn:${AWS::Partition}:s3:::${PipelineArtifactBucket}/*
+              Condition:
+                Bool:
+                    aws:SecureTransport: false
+            - Action:
+                - s3:*
+              Effect: Allow
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:s3:::${PipelineArtifactBucket}'
+                - !Sub 'arn:${AWS::Partition}:s3:::${PipelineArtifactBucket}/*'
+              Principal:
+                AWS:
+                  - !GetAtt CodePipelineExecutionRole.Arn
+
+    CodePipelineExecutionRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: !Sub ${Prefix}-${Environment}-CodePipelineRole
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+              - Action:
+                    - 'sts:AssumeRole'
+                Effect: Allow
+                Principal:
+                    Service:
+                        - codepipeline.amazonaws.com
+        Policies:
+          - PolicyName: CodePipelineAccess
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                  - Effect: Allow
+                    Action:
+                        - 'iam:PassRole'
+                    Resource: '*'
+          - PolicyName: CodePipelineCodeAndS3Bucket
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Action:
+                    - s3:GetBucketAcl
+                    - s3:GetBucketLocation
+                  Effect: Allow
+                  Resource:
+                    - !Sub 'arn:${AWS::Partition}:s3:::${PipelineArtifactBucket}'
+                    - !Sub 'arn:${AWS::Partition}:s3:::${PipelineArtifactBucket}/*'
+                - Action:
+                    - 's3:GetObject'
+                    - 's3:GetObjectVersion'
+                    - 's3:PutObject'
+                  Effect: Allow
+                  Resource:
+                    - !Sub 'arn:${AWS::Partition}:s3:::${PipelineArtifactBucket}'
+                    - !Sub 'arn:${AWS::Partition}:s3:::${PipelineArtifactBucket}/*'
+          - PolicyName: CodePipelineCodeBuildAndCloudformationAccess
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - 'codebuild:StartBuild'
+                    - 'codebuild:BatchGetBuilds'
+                  Resource:
+                    - !GetAtt CodeBuildProjectBuildAndPackage.Arn
+                    - !GetAtt CodeBuildProjectDeploy.Arn
+                - Effect: Allow
+                  Action:
+                    - 'cloudformation:CreateStack'
+                    - 'cloudformation:DescribeStacks'
+                    - 'cloudformation:DeleteStack'
+                    - 'cloudformation:UpdateStack'
+                    - 'cloudformation:CreateChangeSet'
+                    - 'cloudformation:ExecuteChangeSet'
+                    - 'cloudformation:DeleteChangeSet'
+                    - 'cloudformation:DescribeChangeSet'
+                    - 'cloudformation:SetStackPolicy'
+                    - 'cloudformation:ValidateTemplate'
+                  Resource:
+                    - !Sub 'arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*'
+          - PolicyName: CodeStarConnectionAccess
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - 'codestar-connections:UseConnection'
+                    - 'codestar-connections:GetConnection'
+                    - 'codestar-connections:PassConnection'
+                    - 'codestar-connections:ListConnections'
+                  Resource: !Ref CodeStarConnectionArn
+
+    ECRRepository:
+      Type: AWS::ECR::Repository
+      Properties:
+        RepositoryName: !Sub ${RepoName}-${Environment}
+        EmptyOnDelete: false
+        ImageTagMutability: MUTABLE
+        LifecyclePolicy:
+          LifecyclePolicyText: |
+              {
+                "rules": [
+                  {
+                    "rulePriority": 1,
+                    "description": "Keep only the last 5 images",
+                    "selection": {
+                      "tagStatus": "any",
+                      "countType": "imageCountMoreThan",
+                      "countNumber": 5
+                    },
+                    "action": {
+                      "type": "expire"
+                    }
+                  }
+                ]
+              } 
+        RepositoryPolicyText: 
+            Version: "2012-10-17"
+            Statement:
+              - Sid: BatchECRImageRetrievalPolicy
+                Effect: Allow 
+                Action: 
+                  - ecr:BatchGetImage
+                  - ecr:DeleteRepositoryPolicy
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:GetRepositoryPolicy
+                  - ecr:SetRepositoryPolicy
+                Principal:
+                  Service:
+                    - lambda.amazonaws.com
+                    - ecs-tasks.amazonaws.com
+                Condition:
+                  StringLike:
+                    aws:sourceArn: !Sub arn:aws:batch:${AWS::Region}:${AWS::AccountId}:*
+
+    #   ____          _      ____        _ _     _
+    #  / ___|___   __| | ___| __ ) _   _(_| | __| |
+    # | |   / _ \ / _` |/ _ |  _ \| | | | | |/ _` |
+    # | |__| (_) | (_| |  __| |_) | |_| | | | (_| |
+    #  \____\___/ \__,_|\___|____/ \__,_|_|_|\__,_|
+    CodeBuildServiceRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: !Sub ${Prefix}-${Environment}-CodeBuildRole
+        Tags:
+          - Key: Role
+            Value: aws-serverless-pipeline-codebuild-service-role
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Action:
+                - 'sts:AssumeRole'
+              Effect: Allow
+              Principal:
+                Service:
+                  - codebuild.amazonaws.com
+        ManagedPolicyArns:
+          - "arn:aws:iam::aws:policy/AmazonCognitoPowerUser"
+        Policies:
+          - PolicyName: CodeBuildLogs
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - 'logs:CreateLogGroup'
+                    - 'logs:CreateLogStream'
+                    - 'logs:PutLogEvents'
+                  Resource:
+                    - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*'
+          - PolicyName: CodeBuildArtifactsBucket
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - "s3:GetBucketPublicAccessBlock"
+                    - "s3:GetBucketPolicyStatus"
+                    - "s3:PutObject"
+                    - "s3:GetObject"
+                    - "s3:ListAllMyBuckets"
+                    - "s3:GetBucketLogging"
+                    - "s3:PutBucketPolicy"
+                    - "s3:CreateBucket"
+                    - "s3:ListBucket"
+                    - "s3:GetBucketLocation"
+                    - "s3:GetBucketPolicy"
+                    - "s3:GetObjectVersion"
+                    - "s3:DeleteBucket"
+                  Resource: '*'
+          - PolicyName: CloudFormationAccess
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Action:
+                    - "cloudformation:*"
+                  Effect: Allow
+                  Resource: '*'
+          - PolicyName: ServerlessAccess
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - "lambda:*"
+                    - "apigateway:*"
+                    - "iam:*"
+                    - "ecr:*"
+                    - "batch:*"
+                    - "cognito-idp:*"
+                  Resource: '*'
+          - PolicyName: ECRRepositoryAccess
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - ecr:BatchGetImage
+                    - ecr:BatchCheckLayerAvailability
+                    - ecr:CompleteLayerUpload
+                    - ecr:GetDownloadUrlForLayer
+                    - ecr:InitiateLayerUpload
+                    - ecr:PutImage
+                    - ecr:UploadLayerPart
+                    - ecr:GetAuthorizationToken
+                    - ecr:DescribeImages
+                  Resource: "*"
+    
+    CodeBuildProjectBuildAndPackage:
+      Type: AWS::CodeBuild::Project
+      Properties:
+        Artifacts:
+          Type: CODEPIPELINE
+        Environment:
+          Type: LINUX_CONTAINER
+          ComputeType: BUILD_GENERAL1_SMALL
+          Image: aws/codebuild/amazonlinux2-x86_64-standard:4.0
+          PrivilegedMode: true
+          EnvironmentVariables:
+            - Name: REGION
+              Value: !Ref Region
+            - Name: AWS_ACCOUNT_ID
+              Value: !Ref "AWS::AccountId"
+            - Name: AWS_ECR_REPOSITORY_URI
+              Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${RepoName}-${Environment}
+            - Name: IMAGE_REPO_NAME
+              Value: !Sub ${RepoName}-${Environment}
+            - Name: IMAGE_TAG
+              Value: latest
+            - Name: Environment 
+              Value: !Ref Environment
+        ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+        Source:
+          Type: CODEPIPELINE
+          BuildSpec: |
+            version: 0.2
+            
+            phases:
+              install:
+                runtime-versions:
+                  nodejs: 18
+                commands:
+                  - npm install -g serverless
+              pre_build:
+                commands:
+                  - echo Logging in to Amazon ECR...
+                  - aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
+                  - npm install
+              build:
+                commands:
+                  - echo Build started on `date`
+                  - echo Building the Docker image...
+                  - cd docker
+                  - docker build -t $IMAGE_REPO_NAME:$IMAGE_TAG .
+                  - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $AWS_ECR_REPOSITORY_URI:$IMAGE_TAG
+              post_build:
+                commands:
+                  - echo Build completed on `date`
+                  - echo Pushing the Docker image...
+                  - docker push $AWS_ECR_REPOSITORY_URI:$IMAGE_TAG
+            
+            artifacts:
+              files:
+                - serverless.yml
+                - handler.js
+                - package.json
+                - package-lock.json
+                - docker/**/*
+                - node_modules/**/*
+        Name: !Sub '${Prefix}-${Environment}-BuildAndPackage'
+        Description: !Sub 'BuildAndPackage Project for Repo - ${RepoName}'
+    
+    CodeBuildProjectBuildAndPackageLogGroup:
+      Type: AWS::Logs::LogGroup
+      Properties:
+        LogGroupName: !Sub '/aws/codebuild/${CodeBuildProjectBuildAndPackage}'
+        RetentionInDays: 30
+    
+    CodeBuildProjectDeploy:
+      Type: AWS::CodeBuild::Project
+      Properties:
+        Artifacts:
+          Type: CODEPIPELINE
+        Environment:
+          Type: LINUX_CONTAINER
+          ComputeType: BUILD_GENERAL1_SMALL
+          Image: aws/codebuild/amazonlinux2-x86_64-standard:4.0
+          EnvironmentVariables:
+            - Name: REGION
+              Value: !Ref Region
+            - Name: ENV_NAME
+              Value: !Ref Environment
+            - Name: STAGE
+              Value: !Ref Stage
+            - Name: S3_BUCKET
+              Value: !Ref S3Bucket
+            - Name: S3_KEY
+              Value: !Ref S3Key
+            - Name: USER_POOL_ID
+              Value: !Ref UserPoolId
+        ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+        Source:
+          Type: CODEPIPELINE
+          BuildSpec: |
+            version: 0.2
+            
+            phases:
+              install:
+                runtime-versions:
+                  nodejs: 18
+                commands:
+                  - npm install -g serverless
+              pre_build:
+                commands:
+                  - npm install
+              build:
+                commands:
+                  - echo Deploying with Serverless Framework
+                  - serverless deploy --stage $STAGE --region $REGION --bucket $S3_BUCKET --key $S3_KEY --userPoolId $USER_POOL_ID --verbose
+              post_build:
+                commands:
+                  - echo Deployment completed on `date`
+        Name: !Sub '${Prefix}-${Environment}-deploy'
+        Description: !Sub 'Deploy Project for Repo - ${RepoName}'
+    
+    CodeBuildProjectDeployLogGroup:
+      Type: AWS::Logs::LogGroup
+      Properties:
+        LogGroupName: !Sub '/aws/codebuild/${CodeBuildProjectDeploy}'
+        RetentionInDays: 30
+
+Outputs:
+  CodeBuildServiceRoleArn:
+    Value: !GetAtt CodeBuildServiceRole.Arn
+  PipelineExecutionRoleArn:
+    Value: !GetAtt CodePipelineExecutionRole.Arn 
+  ECRRepositoryUri:
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${RepoName}-${Environment}
