@@ -42,7 +42,7 @@ Parameters:
     Default: 'cognito-backup-bucket-test-s3'
   S3Key:
     Type: String
-    Default: 'cognito-users-backup (1).json'
+    Default: 'cognito-users-backup.json'
   UserPoolId:
     Type: String
     Default: 'ap-south-1_OpPrIODGO'
@@ -61,17 +61,16 @@ Conditions:
   IsS3BucketExistsCondition: !Equals [!Ref IsS3BucketExists, "true"]
 
 Resources:
-  PipelineArtifactBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Sub 'pipeline-artifacts-${AWS::AccountId}-${AWS::Region}-${AWS::StackName}'
-  
+  CodePipelineArtifactBucket:
+  Type: AWS::S3::Bucket
+  Properties:
+    BucketName: !Sub '${Prefix}-${Environment}-pipe-${AWS::AccountId}'
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
       Name: !Sub '${RepoName}-${Environment}-pipeline'
       ArtifactStore:
-        Location: !Ref PipelineArtifactBucket
+        Location: !Ref CodePipelineArtifactBucket
         Type: S3
       RoleArn: !GetAtt CodePipelineExecutionRole.Arn
       RestartExecutionOnUpdate: true
@@ -124,15 +123,15 @@ Resources:
   PipelineArtifactsBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
-      Bucket: !Ref PipelineArtifactBucket
+      Bucket: !Ref CodePipelineArtifactBucket
       PolicyDocument:
         Statement:
           - Effect: 'Deny'
             Action: 's3:*'
             Principal: '*'
             Resource:
-              - !Sub arn:${AWS::Partition}:s3:::${PipelineArtifactBucket}
-              - !Sub arn:${AWS::Partition}:s3:::${PipelineArtifactBucket}/*
+              - !Sub arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}
+              - !Sub arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}/*
             Condition:
               Bool:
                 aws:SecureTransport: false
@@ -140,8 +139,8 @@ Resources:
               - s3:*
             Effect: Allow
             Resource:
-              - !Sub 'arn:${AWS::Partition}:s3:::${PipelineArtifactBucket}'
-              - !Sub 'arn:${AWS::Partition}:s3:::${PipelineArtifactBucket}/*'
+              - !Sub 'arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}'
+              - !Sub 'arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}/*'
             Principal:
               AWS:
                 - !GetAtt CodePipelineExecutionRole.Arn
@@ -177,16 +176,16 @@ Resources:
                   - s3:GetBucketLocation
                 Effect: Allow
                 Resource:
-                  - !Sub 'arn:${AWS::Partition}:s3:::${PipelineArtifactBucket}'
-                  - !Sub 'arn:${AWS::Partition}:s3:::${PipelineArtifactBucket}/*'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}/*'
               - Action:
                   - 's3:GetObject'
                   - 's3:GetObjectVersion'
                   - 's3:PutObject'
                 Effect: Allow
                 Resource:
-                  - !Sub 'arn:${AWS::Partition}:s3:::${PipelineArtifactBucket}'
-                  - !Sub 'arn:${AWS::Partition}:s3:::${PipelineArtifactBucket}/*'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}/*'
 
   ECRRepository:
     Type: AWS::ECR::Repository
