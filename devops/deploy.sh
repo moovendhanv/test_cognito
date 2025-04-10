@@ -13,12 +13,6 @@ echo "Tags=${Tags}"
 BUCKET_NOT_EXIST=100
 IsS3BucketExists=true
 
-# Check if the S3 bucket exists
-if ! aws s3api list-objects --bucket "$PipelineArtifactBucket" --no-cli-pager; then
-    echo "Bucket does not exist"
-    IsS3BucketExists=false
-fi
-
 # Deploy the CloudFormation stack with SAM
 sam deploy -t cloudformation.yaml \
     --stack-name "$PipelineStackName" \
