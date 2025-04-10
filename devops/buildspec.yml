@@ -1,0 +1,25 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 18
+    commands:
+      - npm install -g serverless
+      - npm install
+  
+  build:
+    commands:
+      - echo "Building and deploying the service"
+      - serverless deploy --stage $STAGE --region $REGION --bucket $S3_BUCKET --key $S3_KEY --userPoolId $USER_POOL_ID
+  
+  post_build:
+    commands:
+      - echo "Deployment completed on `date`"
+
+artifacts:
+  files:
+    - serverless.yml
+    - package.json
+    - node_modules/**/*
+    - docker/**/*

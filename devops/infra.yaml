@@ -1,0 +1,280 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template for Cognito Restore Service CI/CD Pipeline'
+
+Parameters:
+  RepositoryName:
+    Type: String
+    Default: cognito-restore-service
+    Description: Name of the CodeCommit repository
+  
+  BranchName:
+    Type: String
+    Default: main
+    Description: Branch name to use for the source code
+  
+  Stage:
+    Type: String
+    Default: dev
+    Description: Deployment stage (dev, staging, prod)
+  
+  Region:
+    Type: String
+    Default: us-east-1
+    Description: AWS Region for deployment
+  
+  S3Bucket:
+    Type: String
+    Default: cognito-backup-bucket
+    Description: S3 bucket for Cognito backup
+  
+  S3Key:
+    Type: String
+    Default: cognito-backup.json
+    Description: S3 key for the Cognito backup file
+  
+  UserPoolId:
+    Type: String
+    Default: us-east-1_XXXXXXXX
+    Description: Cognito User Pool ID for restoration
+
+Resources:
+  # S3 Bucket for Pipeline Artifacts
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # IAM Role for CodeBuild
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+      Policies:
+        - PolicyName: CodeBuildServiceRolePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                Resource:
+                  - !Sub '${ArtifactBucket.Arn}/*'
+              - Effect: Allow
+                Action:
+                  - codebuild:CreateReportGroup
+                  - codebuild:CreateReport
+                  - codebuild:UpdateReport
+                  - codebuild:BatchPutTestCases
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - cloudformation:*
+                  - s3:*
+                  - logs:*
+                  - iam:PassRole
+                  - iam:GetRole
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - ecr:*
+                  - batch:*
+                  - lambda:*
+                  - cognito-idp:*
+                Resource: '*'
+
+  # IAM Role for CodePipeline
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess
+        - arn:aws:iam::aws:policy/AWSCodeCommitFullAccess
+      Policies:
+        - PolicyName: CodePipelineServiceRolePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt ArtifactBucket.Arn
+                  - !Sub '${ArtifactBucket.Arn}/*'
+
+  # CodeBuild Project
+  BuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${RepositoryName}-build'
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:4.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: STAGE
+            Value: !Ref Stage
+          - Name: REGION
+            Value: !Ref Region
+          - Name: S3_BUCKET
+            Value: !Ref S3Bucket
+          - Name: S3_KEY
+            Value: !Ref S3Key
+          - Name: USER_POOL_ID
+            Value: !Ref UserPoolId
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          
+          phases:
+            install:
+              runtime-versions:
+                nodejs: 18
+              commands:
+                - npm install -g serverless
+                - npm install
+            
+            build:
+              commands:
+                - echo "Building and deploying the service"
+                - serverless deploy --stage $STAGE --region $REGION --bucket $S3_BUCKET --key $S3_KEY --userPoolId $USER_POOL_ID
+            
+            post_build:
+              commands:
+                - echo "Deployment completed on `date`"
+          
+          artifacts:
+            files:
+              - serverless.yml
+              - package.json
+              - node_modules/**/*
+              - docker/**/*
+              - appspec.yml
+              - buildspec.yml
+              - '**/*'
+
+  # CodePipeline
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeCommit
+                Version: '1'
+              Configuration:
+                RepositoryName: !Ref RepositoryName
+                BranchName: !Ref BranchName
+                PollForSourceChanges: false
+              OutputArtifacts:
+                - Name: SourceCode
+        
+        - Name: Build
+          Actions:
+            - Name: BuildAndDeploy
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref BuildProject
+              InputArtifacts:
+                - Name: SourceCode
+
+  # CloudWatch Event Rule to trigger pipeline on repository changes
+  CodeCommitTrigger:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source:
+          - aws.codecommit
+        detail-type:
+          - 'CodeCommit Repository State Change'
+        resources:
+          - !GetAtt CodeRepository.Arn
+        detail:
+          event:
+            - referenceCreated
+            - referenceUpdated
+          referenceType:
+            - branch
+          referenceName:
+            - !Ref BranchName
+      Targets:
+        - Arn: !Sub 'arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}'
+          Id: Pipeline
+          RoleArn: !GetAtt EventsServiceRole.Arn
+
+  # IAM Role for CloudWatch Events
+  EventsServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: EventsServiceRolePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: codepipeline:StartPipelineExecution
+                Resource: !Sub 'arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}'
+
+Outputs:
+  CodeCommitRepositoryURL:
+    Description: URL to the CodeCommit repository
+    Value: !GetAtt CodeRepository.CloneUrlHttp
+
+  PipelineName:
+    Description: Name of the created pipeline
+    Value: !Ref Pipeline
+
+  ArtifactBucketName:
+    Description: Name of the artifact bucket
+    Value: !Ref ArtifactBucket

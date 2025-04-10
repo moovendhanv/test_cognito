@@ -1,0 +1,10 @@
+# package json
+package-lock.json
+coverage
+.env
+layers/nodejs/utils
+.qodo
+node_modules
+
+# Dependency directories
+node_modules/
