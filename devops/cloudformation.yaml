@@ -66,13 +66,12 @@ Resources:
     # | |_) | | '_ \ / _ | | | '_ \ / _ \
     # |  __/| | |_) |  __| | | | | |  __/
     # |_|   |_| .__/ \___|_|_|_| |_|\___|
-    #         |_|
-    CPCBS3Bucket:
+    #         |_|   
+    PipelineArtifactBucket:
       Type: AWS::S3::Bucket
-      Condition: IsS3BucketExistsCondition
       Properties:
-        BucketName: !Ref PipelineArtifactBucket
-
+      BucketName: !Sub 'pipeline-artifacts-${AWS::AccountId}-${AWS::Region}-${AWS::StackName}'
+     
     Pipeline:
       Type: AWS::CodePipeline::Pipeline
       Properties:

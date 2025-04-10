@@ -1,44 +1,45 @@
+#!/bin/bash
+set -e
+set -x
+
+# Load environment variables from the .env file
+source ../.env
+
+# Debug - Print important variables
+echo "PipelineArtifactBucket=${PipelineArtifactBucket}"
+echo "Tags=${Tags}"
+
 # Define custom exception types
-export BUCKET_NOT_EXIST=100
+BUCKET_NOT_EXIST=100
 IsS3BucketExists=true
 
-# Try to list the objects in the S3 bucket
-try {
-    aws s3api list-objects --bucket $PipelineArtifactBucket --no-cli-pager || throw $BUCKET_NOT_EXIST
-} catch || {
-    case $exception_code in
-        $BUCKET_NOT_EXIST)
-            echo "Bucket does not exist"
-            IsS3BucketExists=false
-        ;;
-        *)
-            echo "Unknown error: $exit_code"
-            throw $exit_code
-        ;;
-    esac
-}
+# Check if the S3 bucket exists
+if ! aws s3api list-objects --bucket "$PipelineArtifactBucket" --no-cli-pager; then
+    echo "Bucket does not exist"
+    IsS3BucketExists=false
+fi
 
 # Deploy the CloudFormation stack with SAM
 sam deploy -t cloudformation.yaml \
-           --stack-name $PipelineStackName \
-           --region=$Region \
-           --no-fail-on-empty-changeset \
-           --capabilities=CAPABILITY_NAMED_IAM CAPABILITY_IAM \
-           --parameter-overrides \
-               Tags=${Tags} \
-               Stage=${Stage} \
-               Region=${Region} \
-               Prefix=${Prefix} \
-               RepoName=${RepoName} \
-               GitBranch=${GitBranch} \
-               Environment=${Environment} \
-               XrayEnabled=${XrayEnabled} \
-               GitHubOwner=${GitHubOwner} \
-               ResourceStackName=${ResourceStackName} \
-               GitHubRepositoryName=${GitHubRepositoryName} \
-               CodeStarConnectionArn=${CodeStarConnectionArn} \
-               PipelineArtifactBucket=${PipelineArtifactBucket} \
-               S3Bucket=${S3Bucket} \
-               S3Key=${S3Key} \
-               UserPoolId=${UserPoolId} \
-               IsS3BucketExists=${IsS3BucketExists}
+    --stack-name "$PipelineStackName" \
+    --region "$Region" \
+    --no-fail-on-empty-changeset \
+    --capabilities CAPABILITY_NAMED_IAM CAPABILITY_IAM \
+    --parameter-overrides \
+        ParameterKey=Tags,ParameterValue="${Tags}" \
+        ParameterKey=Stage,ParameterValue="${Stage}" \
+        ParameterKey=Region,ParameterValue="${Region}" \
+        ParameterKey=Prefix,ParameterValue="${Prefix}" \
+        ParameterKey=RepoName,ParameterValue="${RepoName}" \
+        ParameterKey=GitBranch,ParameterValue="${GitBranch}" \
+        ParameterKey=Environment,ParameterValue="${Environment}" \
+        ParameterKey=XrayEnabled,ParameterValue="${XrayEnabled}" \
+        ParameterKey=GitHubOwner,ParameterValue="${GitHubOwner}" \
+        ParameterKey=ResourceStackName,ParameterValue="${ResourceStackName}" \
+        ParameterKey=GitHubRepositoryName,ParameterValue="${GitHubRepositoryName}" \
+        ParameterKey=CodeStarConnectionArn,ParameterValue="${CodeStarConnectionArn}" \
+        ParameterKey=PipelineArtifactBucket,ParameterValue="${PipelineArtifactBucket}" \
+        ParameterKey=S3Bucket,ParameterValue="${S3Bucket}" \
+        ParameterKey=S3Key,ParameterValue="${S3Key}" \
+        ParameterKey=UserPoolId,ParameterValue="${UserPoolId}" \
+        ParameterKey=IsS3BucketExists,ParameterValue="${IsS3BucketExists}"
