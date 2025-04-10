@@ -1,0 +1,362 @@
+service: cognito-restore-service
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: ${opt:region, 'us-east-1'}
+  stage: ${opt:stage, 'dev'}
+  memorySize: 512
+  timeout: 30
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - ecr:GetAuthorizationToken
+            - ecr:BatchCheckLayerAvailability
+            - ecr:GetDownloadUrlForLayer
+            - ecr:BatchGetImage
+            - ecr:InitiateLayerUpload
+            - ecr:UploadLayerPart
+            - ecr:CompleteLayerUpload
+            - ecr:PutImage
+          Resource: '*'
+        - Effect: Allow
+          Action:
+            - batch:SubmitJob
+            - batch:DescribeJobs
+            - batch:TerminateJob
+          Resource: '*'
+        - Effect: Allow
+          Action:
+            - cognito-idp:ListUsers
+            - cognito-idp:AdminCreateUser
+            - cognito-idp:AdminSetUserPassword
+            - cognito-idp:AdminUpdateUserAttributes
+          Resource: '*'
+        - Effect: Allow
+          Action:
+            - s3:GetObject
+          Resource: 'arn:aws:s3:::${self:custom.s3Bucket}/${self:custom.s3Key}'
+        - Effect: Allow
+          Action:
+            - iam:PassRole
+          Resource: '*'
+
+custom:
+  ecrRepository: 
+    name: ${self:service}-${self:provider.stage}
+  s3Bucket: ${opt:bucket, 'cognito-backup-bucket'}
+  s3Key: ${opt:key, 'cognito-backup.json'}
+  userPoolId: ${opt:userPoolId, 'us-east-1_XXXXXXXX'}
+
+package:
+  individually: true
+  patterns:
+    - '!node_modules/**'
+    - '!.serverless/**'
+    - '!.git/**'
+
+resources:
+  Resources:
+    EcrRepository:
+      Type: AWS::ECR::Repository
+      Properties:
+        RepositoryName: ${self:custom.ecrRepository.name}
+        LifecyclePolicy:
+          LifecyclePolicyText: |
+            {
+              "rules": [
+                {
+                  "rulePriority": 1,
+                  "description": "Keep only the last 5 images",
+                  "selection": {
+                    "tagStatus": "any",
+                    "countType": "imageCountMoreThan",
+                    "countNumber": 5
+                  },
+                  "action": {
+                    "type": "expire"
+                  }
+                }
+              ]
+            }
+    
+    FargateExecutionRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: ecs-tasks.amazonaws.com
+              Action: sts:AssumeRole
+        ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        Policies:
+          - PolicyName: S3Access
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                  Resource: 'arn:aws:s3:::${self:custom.s3Bucket}/${self:custom.s3Key}'
+    
+    FargateJobRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: ecs-tasks.amazonaws.com
+              Action: sts:AssumeRole
+        Policies:
+          - PolicyName: CognitoRestorePolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - cognito-idp:ListUsers
+                    - cognito-idp:AdminCreateUser
+                    - cognito-idp:AdminSetUserPassword
+                    - cognito-idp:AdminUpdateUserAttributes
+                  Resource: '*'
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                  Resource: 'arn:aws:s3:::${self:custom.s3Bucket}/${self:custom.s3Key}'
+    
+    BatchServiceRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: batch.amazonaws.com
+              Action: sts:AssumeRole
+        ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole
+    
+    BatchComputeEnvironment:
+      Type: AWS::Batch::ComputeEnvironment
+      Properties:
+        Type: MANAGED
+        State: ENABLED
+        ServiceRole: !GetAtt BatchServiceRole.Arn
+        ComputeEnvironmentName: ${self:service}-${self:provider.stage}-env
+        ComputeResources:
+          Type: FARGATE
+          MaxvCpus: 4
+          Subnets:
+            - Fn::ImportValue: PublicSubnet1
+            - Fn::ImportValue: PublicSubnet2
+          SecurityGroupIds:
+            - Fn::ImportValue: DefaultSecurityGroup
+    
+    BatchJobQueue:
+      Type: AWS::Batch::JobQueue
+      Properties:
+        JobQueueName: ${self:service}-${self:provider.stage}-queue
+        State: ENABLED
+        Priority: 1
+        ComputeEnvironmentOrder:
+          - Order: 1
+            ComputeEnvironment: !Ref BatchComputeEnvironment
+    
+    BatchJobDefinition:
+      Type: AWS::Batch::JobDefinition
+      Properties:
+        JobDefinitionName: ${self:service}-${self:provider.stage}-job-def
+        Type: container
+        PlatformCapabilities:
+          - FARGATE
+        ContainerProperties:
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${self:custom.ecrRepository.name}:latest
+          ExecutionRoleArn: !GetAtt FargateExecutionRole.Arn
+          JobRoleArn: !GetAtt FargateJobRole.Arn
+          FargatePlatformConfiguration:
+            PlatformVersion: LATEST
+          ResourceRequirements:
+            - Type: VCPU
+              Value: '1'
+            - Type: MEMORY
+              Value: '2048'
+          Environment:
+            - Name: NEW_USER_POOL_ID
+              Value: ${self:custom.userPoolId}
+            - Name: REGION
+              Value: ${self:provider.region}
+            - Name: S3_BUCKET
+              Value: ${self:custom.s3Bucket}
+            - Name: S3_KEY
+              Value: ${self:custom.s3Key}
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /aws/batch/${self:service}-${self:provider.stage}
+              awslogs-region: ${self:provider.region}
+              awslogs-stream-prefix: cognito-restore
+              awslogs-create-group: "true"
+    
+    # This resource automatically submits a job after the job definition is created
+    AutoSubmitBatchJob:
+      Type: Custom::AutoSubmitBatchJob
+      DependsOn:
+        - BatchJobDefinition
+        - BatchJobQueue
+      Properties:
+        ServiceToken: !GetAtt AutoSubmitBatchJobFunction.Arn
+        JobDefinition: !Ref BatchJobDefinition
+        JobQueue: !Ref BatchJobQueue
+        JobName: cognito-restore-job
+        Environment:
+          - Name: NEW_USER_POOL_ID
+            Value: ${self:custom.userPoolId}
+          - Name: REGION
+            Value: ${self:provider.region}
+          - Name: S3_BUCKET
+            Value: ${self:custom.s3Bucket}
+          - Name: S3_KEY
+            Value: ${self:custom.s3Key}
+    
+    # Lambda function that will submit our batch job automatically
+    AutoSubmitBatchJobFunction:
+      Type: AWS::Lambda::Function
+      Properties:
+        Handler: index.handler
+        Runtime: nodejs18.x
+        Timeout: 300
+        Role: !GetAtt AutoSubmitBatchJobRole.Arn
+        Code:
+          ZipFile: |
+            const AWS = require('aws-sdk');
+            const https = require('https');
+            const url = require('url');
+            
+            exports.handler = async (event, context) => {
+              console.log('Auto Submit Batch Job Event:', JSON.stringify(event));
+              
+              if (event.RequestType === 'Delete') {
+                await sendResponse(event, context, 'SUCCESS');
+                return;
+              }
+              
+              try {
+                const batch = new AWS.Batch();
+                
+                // Submit the batch job
+                const params = {
+                  jobName: event.ResourceProperties.JobName,
+                  jobQueue: event.ResourceProperties.JobQueue,
+                  jobDefinition: event.ResourceProperties.JobDefinition,
+                  containerOverrides: {
+                    environment: event.ResourceProperties.Environment
+                  }
+                };
+                
+                console.log('Submitting batch job with params:', JSON.stringify(params));
+                const result = await batch.submitJob(params).promise();
+                console.log('Batch job submitted:', result.jobId);
+                
+                await sendResponse(event, context, 'SUCCESS', { JobId: result.jobId });
+              } catch (error) {
+                console.error('Error submitting batch job:', error);
+                await sendResponse(event, context, 'FAILED', null, error.message);
+              }
+            };
+            
+            // Helper function to send response back to CloudFormation
+            async function sendResponse(event, context, status, data = null, reason = null) {
+              const responseBody = JSON.stringify({
+                Status: status,
+                Reason: reason || 'See CloudWatch logs for details',
+                PhysicalResourceId: context.logStreamName,
+                StackId: event.StackId,
+                RequestId: event.RequestId,
+                LogicalResourceId: event.LogicalResourceId,
+                Data: data
+              });
+              
+              const parsedUrl = url.parse(event.ResponseURL);
+              
+              const options = {
+                hostname: parsedUrl.hostname,
+                port: 443,
+                path: parsedUrl.path,
+                method: 'PUT',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Content-Length': responseBody.length
+                }
+              };
+              
+              return new Promise((resolve, reject) => {
+                const req = https.request(options, (res) => {
+                  console.log(`CloudFormation response status code: ${res.statusCode}`);
+                  resolve();
+                });
+                
+                req.on('error', (error) => {
+                  console.error('Error sending response to CloudFormation:', error);
+                  reject(error);
+                });
+                
+                req.write(responseBody);
+                req.end();
+              });
+            }
+    
+    AutoSubmitBatchJobRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: lambda.amazonaws.com
+              Action: sts:AssumeRole
+        ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        Policies:
+          - PolicyName: BatchJobSubmissionPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action: batch:SubmitJob
+                  Resource: '*'
+  
+  Outputs:
+    EcrRepositoryUri:
+      Description: ECR Repository URI
+      Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${self:custom.ecrRepository.name}
+    JobQueueArn:
+      Description: The ARN of the Batch Job Queue
+      Value: !Ref BatchJobQueue
+    JobDefinitionArn:
+      Description: The ARN of the Batch Job Definition
+      Value: !Ref BatchJobDefinition
+
+plugins:
+  - serverless-ecr-deploy
+
+custom:
+  ecr:
+    repository:
+      name: ${self:custom.ecrRepository.name}
+      path: ./docker
+    deploy:
+      - name: ${self:custom.ecrRepository.name}
+        dockerfile: Dockerfile
+        path: ./docker
+        imageTag: latest
