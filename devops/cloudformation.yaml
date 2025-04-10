@@ -65,7 +65,7 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub 'pipeline-artifacts-${AWS::AccountId}-${AWS::Region}-${AWS::StackName}'
-
+  
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
@@ -299,10 +299,18 @@ Resources:
         BuildSpec: |
           version: 0.2
           phases:
+            install:
+              runtime-versions:
+                nodejs: 18
+              commands:
+                - echo "Deploying serverless..."
+                - npm install -g serverless
             build:
               commands:
-                - echo "Deploying Serverless..."
-                - serverless deploy
-          artifacts:
-            files:
-              - '**/*'
+                - echo "Deploying application..."
+                - serverless deploy --stage ${Stage} --region ${Region}
+            post_build:
+              commands:
+                - echo "Deployment complete!"
+      TimeoutInMinutes: 30
+      Name: !Sub '${Prefix}-${Environment}-Deploy'
