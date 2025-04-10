@@ -3,15 +3,22 @@ set -e
 set -x
 
 # Load environment variables from the .env file
-source ../.env
+if [ -f "../.env" ]; then
+    source ../.env
+else
+    echo "Error: .env file not found!"
+    exit 1
+fi
 
 # Debug - Print important variables
 echo "PipelineArtifactBucket=${PipelineArtifactBucket}"
 echo "Tags=${Tags}"
 
-# Define custom exception types
-BUCKET_NOT_EXIST=100
-IsS3BucketExists=true
+# Check if S3 Bucket exists based on the condition
+if [ "$IsS3BucketExists" == "false" ]; then
+    echo "Error: S3 Bucket does not exist, please create it first."
+    exit $BUCKET_NOT_EXIST
+fi
 
 # Deploy the CloudFormation stack with SAM
 sam deploy -t cloudformation.yaml \
