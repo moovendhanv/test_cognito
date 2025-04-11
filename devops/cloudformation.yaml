@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-    CodePipeline CFN Stack for 'cognito-restore-service' micro-service
+  CodePipeline CFN Stack for 'cognito-restore-service' micro-service
 
 Parameters:
   Prefix:
@@ -33,7 +33,7 @@ Parameters:
     Default: 'cognito-restore-dev-pipeline-artifactsbucket'
   CodeStarConnectionArn:
     Type: String
-    Default: 'arn:aws:codestar-connections:us-east-1:698032826194:connection/0e2ebc7a-a6ba-412c-9237-9b502252421c'
+    Default: 'arn:aws:codeconnections:ap-south-1:698032826194:connection/1a46d7fe-b424-4e8f-a61c-1b32b52173d7'  
   Stage:
     Type: String
     Default: 'dev'
@@ -62,9 +62,10 @@ Conditions:
 
 Resources:
   CodePipelineArtifactBucket:
-  Type: AWS::S3::Bucket
-  Properties:
-    BucketName: !Sub '${Prefix}-${Environment}-pipe-${AWS::AccountId}'
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${Prefix}-${Environment}-pipe-${AWS::AccountId}'
+
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
@@ -281,7 +282,7 @@ Resources:
                 - echo "Pushed Docker Image"
       TimeoutInMinutes: 30
       Name: !Sub '${Prefix}-${Environment}-BuildPackage'
-      
+
   CodeBuildProjectDeploy:
     Type: AWS::CodeBuild::Project
     Properties:
