@@ -33,7 +33,7 @@ Parameters:
     Default: 'cognito-restore-dev-pipeline-artifactsbucket'
   CodeStarConnectionArn:
     Type: String
-    Default: 'arn:aws:codeconnections:ap-south-1:698032826194:connection/1a46d7fe-b424-4e8f-a61c-1b32b52173d7'  
+    Default: 'arn:aws:codeconnections:ap-south-1:698032826194:connection/1a46d7fe-b424-4e8f-a61c-1b32b52173d7'
   Stage:
     Type: String
     Default: 'dev'
@@ -61,10 +61,49 @@ Conditions:
   IsS3BucketExistsCondition: !Equals [!Ref IsS3BucketExists, "true"]
 
 Resources:
+
   CodePipelineArtifactBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub '${Prefix}-${Environment}-pipe-${AWS::AccountId}'
+
+  PipelineArtifactsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CodePipelineArtifactBucket
+      PolicyDocument:
+        Statement:
+          - Effect: 'Deny'
+            Action: 's3:*'
+            Principal: '*'
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}
+              - !Sub arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+          - Effect: Allow
+            Action: s3:*
+            Principal:
+              AWS:
+                - !GetAtt CodePipelineExecutionRole.Arn
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}
+              - !Sub arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}/*
+
+  CodePipelineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${Prefix}-${Environment}-CodePipelineRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: 'sts:AssumeRole'
+            Principal:
+              Service: codepipeline.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess  # Grants full access
 
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
@@ -88,10 +127,11 @@ Resources:
                 ConnectionArn: !Ref CodeStarConnectionArn
                 FullRepositoryId: !Sub "${GitHubOwner}/${GitHubRepositoryName}"
                 BranchName: !Ref GitBranch
-                OutputArtifactFormat: "CODE_ZIP"
+                OutputArtifactFormat: CODE_ZIP
               OutputArtifacts:
                 - Name: SourceCodeAsZip
               RunOrder: 1
+
         - Name: BuildAndPackage
           Actions:
             - Name: CodeBuild
@@ -107,6 +147,7 @@ Resources:
                 - Name: SourceCodeAsZip
               OutputArtifacts:
                 - Name: BuildArtifactAsZip
+
         - Name: Deploy
           Actions:
             - Name: DeployServerless
@@ -120,73 +161,6 @@ Resources:
               InputArtifacts:
                 - Name: BuildArtifactAsZip
               RunOrder: 1
-
-  PipelineArtifactsBucketPolicy:
-    Type: AWS::S3::BucketPolicy
-    Properties:
-      Bucket: !Ref CodePipelineArtifactBucket
-      PolicyDocument:
-        Statement:
-          - Effect: 'Deny'
-            Action: 's3:*'
-            Principal: '*'
-            Resource:
-              - !Sub arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}
-              - !Sub arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}/*
-            Condition:
-              Bool:
-                aws:SecureTransport: false
-          - Action:
-              - s3:*
-            Effect: Allow
-            Resource:
-              - !Sub 'arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}'
-              - !Sub 'arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}/*'
-            Principal:
-              AWS:
-                - !GetAtt CodePipelineExecutionRole.Arn
-
-  CodePipelineExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub ${Prefix}-${Environment}-CodePipelineRole
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Action:
-              - 'sts:AssumeRole'
-            Effect: Allow
-            Principal:
-              Service:
-                - codepipeline.amazonaws.com
-      Policies:
-        - PolicyName: CodePipelineAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 'iam:PassRole'
-                Resource: '*'
-        - PolicyName: CodePipelineCodeAndS3Bucket
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Action:
-                  - s3:GetBucketAcl
-                  - s3:GetBucketLocation
-                Effect: Allow
-                Resource:
-                  - !Sub 'arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}'
-                  - !Sub 'arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}/*'
-              - Action:
-                  - 's3:GetObject'
-                  - 's3:GetObjectVersion'
-                  - 's3:PutObject'
-                Effect: Allow
-                Resource:
-                  - !Sub 'arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}'
-                  - !Sub 'arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}/*'
 
   ECRRepository:
     Type: AWS::ECR::Repository
@@ -220,30 +194,17 @@ Resources:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Action:
-              - 'sts:AssumeRole'
-            Effect: Allow
+          - Effect: Allow
+            Action: 'sts:AssumeRole'
             Principal:
-              Service:
-                - codebuild.amazonaws.com
+              Service: codebuild.amazonaws.com
       ManagedPolicyArns:
-        - "arn:aws:iam::aws:policy/AmazonCognitoPowerUser"
-      Policies:
-        - PolicyName: CodeBuildLogs
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 'logs:CreateLogGroup'
-                  - 'logs:CreateLogStream'
-                  - 'logs:PutLogEvents'
-                Resource:
-                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*'
+        - arn:aws:iam::aws:policy/AdministratorAccess
 
   CodeBuildProjectBuildAndPackage:
     Type: AWS::CodeBuild::Project
     Properties:
+      Name: !Sub '${Prefix}-${Environment}-BuildPackage'
       Artifacts:
         Type: CODEPIPELINE
       Environment:
@@ -255,7 +216,7 @@ Resources:
           - Name: REGION
             Value: !Ref Region
           - Name: AWS_ACCOUNT_ID
-            Value: !Ref "AWS::AccountId"
+            Value: !Ref AWS::AccountId
           - Name: AWS_ECR_REPOSITORY_URI
             Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${RepoName}-${Environment}
       ServiceRole: !GetAtt CodeBuildServiceRole.Arn
@@ -281,11 +242,11 @@ Resources:
                 - docker push ${AWS_ECR_REPOSITORY_URI}:latest
                 - echo "Pushed Docker Image"
       TimeoutInMinutes: 30
-      Name: !Sub '${Prefix}-${Environment}-BuildPackage'
 
   CodeBuildProjectDeploy:
     Type: AWS::CodeBuild::Project
     Properties:
+      Name: !Sub '${Prefix}-${Environment}-Deploy'
       Artifacts:
         Type: CODEPIPELINE
       Environment:
@@ -313,4 +274,3 @@ Resources:
               commands:
                 - echo "Deployment complete!"
       TimeoutInMinutes: 30
-      Name: !Sub '${Prefix}-${Environment}-Deploy'
