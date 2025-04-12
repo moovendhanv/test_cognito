@@ -161,6 +161,11 @@ Resources:
         Type: CODEPIPELINE
         Files:
           - imagedefinitions.json
+          - serverless.yml
+          - package.json
+          - node_modules/**/*
+          - docker/**/*
+          
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
