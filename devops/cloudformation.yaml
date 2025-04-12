@@ -28,7 +28,7 @@ Parameters:
     Default: 'cognito-restore-service-dev-stack'
   PipelineArtifactBucket:
     Type: String
-    Default: 'cognito-restore-dev-pipeline-artifactsbucket'
+    Default: 'restore-dev-pipeline-artifactsbucket'
   CodeStarConnectionArn:
     Type: String
     Default: 'arn:aws:codeconnections:ap-south-1:698032826194:connection/1a46d7fe-b424-4e8f-a61c-1b32b52173d7'
@@ -160,11 +160,7 @@ Resources:
       Artifacts:
         Type: CODEPIPELINE
         Files:
-          - imagedefinitions.json
-          - serverless.yml
-          - package.json
-          - node_modules/**/*
-          - docker/**/*
+          - '**/*'
           
       Environment:
         Type: LINUX_CONTAINER
@@ -222,7 +218,8 @@ Resources:
                 - printf '[{"name":"cognito-restore-service","imageUri":"%s"}]' ${AWS_ECR_REPOSITORY_URI}:${IMAGE_TAG} > imagedefinitions.json
 
           artifacts:
-            files: imagedefinitions.json
+            files: 
+              - '**/*'
       TimeoutInMinutes: 30
 
   CodeBuildProjectDeploy:
