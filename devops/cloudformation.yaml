@@ -198,8 +198,19 @@ Resources:
             Action: 'sts:AssumeRole'
             Principal:
               Service: codebuild.amazonaws.com
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AdministratorAccess
+      Policies:
+        - PolicyName: ECRPushPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "ecr:GetAuthorizationToken"
+                  - "ecr:BatchCheckLayerAvailability"
+                  - "ecr:PutImage"
+                  - "ecr:InitiateLayerUpload"
+                  - "ecr:UploadLayerPart"
+                Resource: !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${RepoName}-${Environment}
 
   CodeBuildProjectBuildAndPackage:
     Type: AWS::CodeBuild::Project
@@ -273,5 +284,11 @@ Resources:
                 - serverless deploy --stage ${Stage} --region ${Region}
             post_build:
               commands:
-                - echo "Deployment complete!"
+                - echo "Logging into Amazon ECR..."
+                - $(aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ECR_REPOSITORY_URI})
+                - echo "Building Docker image..."
+                - docker build -t ${AWS_ECR_REPOSITORY_URI}:latest .
+                - echo "Pushing Docker image to ECR..."
+                - docker push ${AWS_ECR_REPOSITORY_URI}:latest
+                - echo "Docker image pushed to ECR"
       TimeoutInMinutes: 30
