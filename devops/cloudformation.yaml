@@ -1,7 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Transform: AWS::Serverless-2016-10-31
-Description: >
-  CodePipeline CFN Stack for 'cognito-restore-service' micro-service
+Description: CodePipeline CFN Stack for 'cognito-restore-service' micro-service
 
 Parameters:
   Prefix:
@@ -53,8 +51,8 @@ Parameters:
     Type: String
     Default: 'Project=CognitoRestore Service=Serverless'
   IsS3BucketExists:
-    Default: "false"
     Type: String
+    Default: "false"
     AllowedValues: ["true", "false"]
 
 Conditions:
@@ -103,89 +101,7 @@ Resources:
             Principal:
               Service: codepipeline.amazonaws.com
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AdministratorAccess  # Grants full access
-
-  Pipeline:
-    Type: AWS::CodePipeline::Pipeline
-    Properties:
-      Name: !Sub '${RepoName}-${Environment}-pipeline'
-      ArtifactStore:
-        Location: !Ref CodePipelineArtifactBucket
-        Type: S3
-      RoleArn: !GetAtt CodePipelineExecutionRole.Arn
-      RestartExecutionOnUpdate: true
-      Stages:
-        - Name: Source
-          Actions:
-            - Name: SourceCodeRepo
-              ActionTypeId:
-                Category: Source
-                Owner: AWS
-                Provider: CodeStarSourceConnection
-                Version: "1"
-              Configuration:
-                ConnectionArn: !Ref CodeStarConnectionArn
-                FullRepositoryId: !Sub "${GitHubOwner}/${GitHubRepositoryName}"
-                BranchName: !Ref GitBranch
-                OutputArtifactFormat: CODE_ZIP
-              OutputArtifacts:
-                - Name: SourceCodeAsZip
-              RunOrder: 1
-
-        - Name: BuildAndPackage
-          Actions:
-            - Name: CodeBuild
-              ActionTypeId:
-                Category: Build
-                Owner: AWS
-                Provider: CodeBuild
-                Version: '1'
-              RunOrder: 1
-              Configuration:
-                ProjectName: !Ref CodeBuildProjectBuildAndPackage
-              InputArtifacts:
-                - Name: SourceCodeAsZip
-              OutputArtifacts:
-                - Name: BuildArtifactAsZip
-
-        - Name: Deploy
-          Actions:
-            - Name: DeployServerless
-              ActionTypeId:
-                Category: Build
-                Owner: AWS
-                Provider: CodeBuild
-                Version: '1'
-              Configuration:
-                ProjectName: !Ref CodeBuildProjectDeploy
-              InputArtifacts:
-                - Name: BuildArtifactAsZip
-              RunOrder: 1
-
-  ECRRepository:
-    Type: AWS::ECR::Repository
-    Properties:
-      RepositoryName: !Sub ${RepoName}-${Environment}
-      EmptyOnDelete: false
-      ImageTagMutability: MUTABLE
-      LifecyclePolicy:
-        LifecyclePolicyText: |
-          {
-            "rules": [
-              {
-                "rulePriority": 1,
-                "description": "Keep only the last 5 images",
-                "selection": {
-                  "tagStatus": "any",
-                  "countType": "imageCountMoreThan",
-                  "countNumber": 5
-                },
-                "action": {
-                  "type": "expire"
-                }
-              }
-            ]
-          }
+        - arn:aws:iam::aws:policy/AdministratorAccess
 
   CodeBuildServiceRole:
     Type: AWS::IAM::Role
@@ -212,20 +128,48 @@ Resources:
                   - "ecr:UploadLayerPart"
                 Resource: !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${RepoName}-${Environment}
 
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${RepoName}-${Environment}
+      EmptyOnDelete: false
+      ImageTagMutability: MUTABLE
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep only the last 5 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 5
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+
   CodeBuildProjectBuildAndPackage:
     Type: AWS::CodeBuild::Project
     Properties:
       Name: !Sub '${Prefix}-${Environment}-BuildPackage'
       Artifacts:
         Type: CODEPIPELINE
+        Files:
+          - imagedefinitions.json
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
-
         PrivilegedMode: true
         EnvironmentVariables:
           - Name: REGION
+            Value: !Ref Region
+          - Name: AWS_REGION
             Value: !Ref Region
           - Name: AWS_ACCOUNT_ID
             Value: !Ref AWS::AccountId
@@ -240,19 +184,40 @@ Resources:
             install:
               runtime-versions:
                 nodejs: 18
+                docker: 20
               commands:
+                - echo "Installing AWS CLI v2..."
+                - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                - unzip awscliv2.zip
+                - sudo ./aws/install
+                - export PATH=$PATH:/usr/local/bin
                 - echo "Installing dependencies..."
                 - npm install
+
+            pre_build:
+              commands:
+                - echo Logging in to Amazon ECR...
+                - aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ECR_REPOSITORY_URI}
+                - echo Setting environment variables...
+                - IMAGE_TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION}
+                - echo $IMAGE_TAG
+
             build:
               commands:
-                - echo "Building..."
-                - npm run build
+                - echo Building Docker image...
+                - docker build -t ${AWS_ECR_REPOSITORY_URI}:${IMAGE_TAG} .
+                - docker tag ${AWS_ECR_REPOSITORY_URI}:${IMAGE_TAG} ${AWS_ECR_REPOSITORY_URI}:latest
+
             post_build:
               commands:
-                - echo "Build complete!"
-                - docker build -t ${AWS_ECR_REPOSITORY_URI}:latest .
+                - echo Pushing Docker image to ECR...
+                - docker push ${AWS_ECR_REPOSITORY_URI}:${IMAGE_TAG}
                 - docker push ${AWS_ECR_REPOSITORY_URI}:latest
-                - echo "Pushed Docker Image"
+                - echo Writing image definitions file...
+                - printf '[{"name":"cognito-restore-service","imageUri":"%s"}]' ${AWS_ECR_REPOSITORY_URI}:${IMAGE_TAG} > imagedefinitions.json
+
+          artifacts:
+            files: imagedefinitions.json
       TimeoutInMinutes: 30
 
   CodeBuildProjectDeploy:
@@ -266,6 +231,11 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
         PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: AWS_REGION
+            Value: !Ref Region
+          - Name: AWS_ECR_REPOSITORY_URI
+            Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${RepoName}-${Environment}
       ServiceRole: !GetAtt CodeBuildServiceRole.Arn
       Source:
         Type: CODEPIPELINE
@@ -281,7 +251,7 @@ Resources:
             build:
               commands:
                 - echo "Deploying application..."
-                - serverless deploy --stage ${Stage} --region ${Region}
+                - serverless deploy --stage ${Stage} --region ${AWS_REGION}
             post_build:
               commands:
                 - echo "Logging into Amazon ECR..."
@@ -292,3 +262,58 @@ Resources:
                 - docker push ${AWS_ECR_REPOSITORY_URI}:latest
                 - echo "Docker image pushed to ECR"
       TimeoutInMinutes: 30
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub '${RepoName}-${Environment}-pipeline'
+      ArtifactStore:
+        Type: S3
+        Location: !Ref CodePipelineArtifactBucket
+      RoleArn: !GetAtt CodePipelineExecutionRole.Arn
+      RestartExecutionOnUpdate: true
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: SourceCodeRepo
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: "1"
+              Configuration:
+                ConnectionArn: !Ref CodeStarConnectionArn
+                FullRepositoryId: !Sub "${GitHubOwner}/${GitHubRepositoryName}"
+                BranchName: !Ref GitBranch
+                OutputArtifactFormat: CODE_ZIP
+              OutputArtifacts:
+                - Name: SourceCodeAsZip
+              RunOrder: 1
+        - Name: BuildAndPackage
+          Actions:
+            - Name: CodeBuild
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              RunOrder: 1
+              Configuration:
+                ProjectName: !Ref CodeBuildProjectBuildAndPackage
+              InputArtifacts:
+                - Name: SourceCodeAsZip
+              OutputArtifacts:
+                - Name: BuildArtifactAsZip
+        - Name: Deploy
+          Actions:
+            - Name: DeployServerless
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref CodeBuildProjectDeploy
+              InputArtifacts:
+                - Name: BuildArtifactAsZip
+              RunOrder: 1
