@@ -236,6 +236,8 @@ Resources:
             Value: !Ref Region
           - Name: AWS_ECR_REPOSITORY_URI
             Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${RepoName}-${Environment}
+          - Name: STAGE
+            Value: !Ref Environment
       ServiceRole: !GetAtt CodeBuildServiceRole.Arn
       Source:
         Type: CODEPIPELINE
@@ -251,11 +253,11 @@ Resources:
             build:
               commands:
                 - echo "Deploying application..."
-                - serverless deploy --stage ${Stage} --region ${AWS_REGION}
+                - serverless deploy --stage ${Stage} --region ${AWS::Region}
             post_build:
               commands:
                 - echo "Logging into Amazon ECR..."
-                - $(aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ECR_REPOSITORY_URI})
+                - $(aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS_ECR_REPOSITORY_URI})
                 - echo "Building Docker image..."
                 - docker build -t ${AWS_ECR_REPOSITORY_URI}:latest .
                 - echo "Pushing Docker image to ECR..."
