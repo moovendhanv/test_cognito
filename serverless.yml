@@ -51,6 +51,15 @@ custom:
   s3Bucket: ${opt:bucket, 'cognito-backup-bucket'}
   s3Key: ${opt:key, 'cognito-backup.json'}
   userPoolId: ${opt:userPoolId, 'us-east-1_XXXXXXXX'}
+  ecr:
+    repository:
+      name: ${self:custom.ecrRepository.name}
+      path: ./docker
+    deploy:
+      - name: ${self:custom.ecrRepository.name}
+        dockerfile: Dockerfile
+        path: ./docker
+        imageTag: latest
 
 package:
   individually: true
@@ -83,7 +92,7 @@ resources:
                 }
               ]
             }
-    
+
     FargateExecutionRole:
       Type: AWS::IAM::Role
       Properties:
@@ -105,7 +114,7 @@ resources:
                   Action:
                     - s3:GetObject
                   Resource: 'arn:aws:s3:::${self:custom.s3Bucket}/${self:custom.s3Key}'
-    
+
     FargateJobRole:
       Type: AWS::IAM::Role
       Properties:
@@ -132,7 +141,7 @@ resources:
                   Action:
                     - s3:GetObject
                   Resource: 'arn:aws:s3:::${self:custom.s3Bucket}/${self:custom.s3Key}'
-    
+
     BatchServiceRole:
       Type: AWS::IAM::Role
       Properties:
@@ -145,7 +154,7 @@ resources:
               Action: sts:AssumeRole
         ManagedPolicyArns:
           - arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole
-    
+
     BatchComputeEnvironment:
       Type: AWS::Batch::ComputeEnvironment
       Properties:
@@ -161,7 +170,7 @@ resources:
             - Fn::ImportValue: PublicSubnet2
           SecurityGroupIds:
             - Fn::ImportValue: DefaultSecurityGroup
-    
+
     BatchJobQueue:
       Type: AWS::Batch::JobQueue
       Properties:
@@ -171,7 +180,7 @@ resources:
         ComputeEnvironmentOrder:
           - Order: 1
             ComputeEnvironment: !Ref BatchComputeEnvironment
-    
+
     BatchJobDefinition:
       Type: AWS::Batch::JobDefinition
       Properties:
@@ -206,8 +215,7 @@ resources:
               awslogs-region: ${self:provider.region}
               awslogs-stream-prefix: cognito-restore
               awslogs-create-group: "true"
-    
-    # This resource automatically submits a job after the job definition is created
+
     AutoSubmitBatchJob:
       Type: Custom::AutoSubmitBatchJob
       DependsOn:
@@ -227,8 +235,7 @@ resources:
             Value: ${self:custom.s3Bucket}
           - Name: S3_KEY
             Value: ${self:custom.s3Key}
-    
-    # Lambda function that will submit our batch job automatically
+
     AutoSubmitBatchJobFunction:
       Type: AWS::Lambda::Function
       Properties:
@@ -241,19 +248,17 @@ resources:
             const AWS = require('aws-sdk');
             const https = require('https');
             const url = require('url');
-            
+
             exports.handler = async (event, context) => {
               console.log('Auto Submit Batch Job Event:', JSON.stringify(event));
-              
+
               if (event.RequestType === 'Delete') {
                 await sendResponse(event, context, 'SUCCESS');
                 return;
               }
-              
+
               try {
                 const batch = new AWS.Batch();
-                
-                // Submit the batch job
                 const params = {
                   jobName: event.ResourceProperties.JobName,
                   jobQueue: event.ResourceProperties.JobQueue,
@@ -262,19 +267,17 @@ resources:
                     environment: event.ResourceProperties.Environment
                   }
                 };
-                
-                console.log('Submitting batch job with params:', JSON.stringify(params));
+
                 const result = await batch.submitJob(params).promise();
                 console.log('Batch job submitted:', result.jobId);
-                
+
                 await sendResponse(event, context, 'SUCCESS', { JobId: result.jobId });
               } catch (error) {
                 console.error('Error submitting batch job:', error);
                 await sendResponse(event, context, 'FAILED', null, error.message);
               }
             };
-            
-            // Helper function to send response back to CloudFormation
+
             async function sendResponse(event, context, status, data = null, reason = null) {
               const responseBody = JSON.stringify({
                 Status: status,
@@ -285,9 +288,9 @@ resources:
                 LogicalResourceId: event.LogicalResourceId,
                 Data: data
               });
-              
+
               const parsedUrl = url.parse(event.ResponseURL);
-              
+
               const options = {
                 hostname: parsedUrl.hostname,
                 port: 443,
@@ -298,23 +301,23 @@ resources:
                   'Content-Length': responseBody.length
                 }
               };
-              
+
               return new Promise((resolve, reject) => {
                 const req = https.request(options, (res) => {
                   console.log(`CloudFormation response status code: ${res.statusCode}`);
                   resolve();
                 });
-                
+
                 req.on('error', (error) => {
                   console.error('Error sending response to CloudFormation:', error);
                   reject(error);
                 });
-                
+
                 req.write(responseBody);
                 req.end();
               });
             }
-    
+
     AutoSubmitBatchJobRole:
       Type: AWS::IAM::Role
       Properties:
@@ -335,28 +338,17 @@ resources:
                 - Effect: Allow
                   Action: batch:SubmitJob
                   Resource: '*'
-  
-  Outputs:
-    EcrRepositoryUri:
-      Description: ECR Repository URI
-      Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${self:custom.ecrRepository.name}
-    JobQueueArn:
-      Description: The ARN of the Batch Job Queue
-      Value: !Ref BatchJobQueue
-    JobDefinitionArn:
-      Description: The ARN of the Batch Job Definition
-      Value: !Ref BatchJobDefinition
+
+outputs:
+  EcrRepositoryUri:
+    Description: ECR Repository URI
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${self:custom.ecrRepository.name}
+  JobQueueArn:
+    Description: The ARN of the Batch Job Queue
+    Value: !Ref BatchJobQueue
+  JobDefinitionArn:
+    Description: The ARN of the Batch Job Definition
+    Value: !Ref BatchJobDefinition
 
 plugins:
   - serverless-ecr-deploy
-
-custom:
-  ecr:
-    repository:
-      name: ${self:custom.ecrRepository.name}
-      path: ./docker
-    deploy:
-      - name: ${self:custom.ecrRepository.name}
-        dockerfile: Dockerfile
-        path: ./docker
-        imageTag: latest
