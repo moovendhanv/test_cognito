@@ -351,4 +351,4 @@ outputs:
     Value: !Ref BatchJobDefinition
 
 plugins:
-  - serverless-ecr-deploy
+  - serverless-ecr-plugin
