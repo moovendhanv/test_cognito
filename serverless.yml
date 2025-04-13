@@ -46,20 +46,11 @@ provider:
           Resource: '*'
 
 custom:
-  ecrRepository: 
+  ecrRepository:
     name: ${self:service}-${self:provider.stage}
   s3Bucket: ${opt:bucket, 'cognito-backup-bucket'}
   s3Key: ${opt:key, 'cognito-backup.json'}
   userPoolId: ${opt:userPoolId, 'ap-south-1_OpPrIODGO'}
-  ecr:
-    repository:
-      name: ${self:custom.ecrRepository.name}
-      path: ./devops
-    deploy:
-      - name: ${self:custom.ecrRepository.name}
-        dockerfile: Dockerfile
-        path: ./devops
-        imageTag: latest
 
 package:
   individually: true
@@ -67,6 +58,14 @@ package:
     - '!node_modules/**'
     - '!.serverless/**'
     - '!.git/**'
+
+functions:
+  imagePusher:
+    handler: scripts/push-image.handler
+    environment:
+      ECR_REPOSITORY: ${self:custom.ecrRepository.name}
+      DOCKERFILE_PATH: ./devops/Dockerfile
+      BUILD_PATH: ./devops
 
 resources:
   Resources:
@@ -351,4 +350,4 @@ outputs:
     Value: !Ref BatchJobDefinition
 
 plugins:
-  - serverless-ecr-plugin
+  - serverless-aws-resource-names
