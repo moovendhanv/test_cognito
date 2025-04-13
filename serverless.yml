@@ -5,7 +5,7 @@ frameworkVersion: '3'
 provider:
   name: aws
   runtime: nodejs18.x
-  region: ${opt:region, 'us-east-1'}
+  region: ${opt:region, 'ap-south-1'}
   stage: ${opt:stage, 'dev'}
   memorySize: 512
   timeout: 30
@@ -50,15 +50,15 @@ custom:
     name: ${self:service}-${self:provider.stage}
   s3Bucket: ${opt:bucket, 'cognito-backup-bucket'}
   s3Key: ${opt:key, 'cognito-backup.json'}
-  userPoolId: ${opt:userPoolId, 'us-east-1_XXXXXXXX'}
+  userPoolId: ${opt:userPoolId, 'ap-south-1_OpPrIODGO'}
   ecr:
     repository:
       name: ${self:custom.ecrRepository.name}
-      path: ./docker
+      path: ./devops
     deploy:
       - name: ${self:custom.ecrRepository.name}
         dockerfile: Dockerfile
-        path: ./docker
+        path: ./devops
         imageTag: latest
 
 package:
