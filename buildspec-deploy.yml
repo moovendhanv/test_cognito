@@ -13,7 +13,7 @@ phases:
   post_build:
     commands:
       - echo "Logging into Amazon ECR..."
-      - $(aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ECR_REPOSITORY_URI})
+      - aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 698032826194.dkr.ecr.ap-south-1.amazonaws.com
       - echo "Building Docker image..."
       - docker build -t ${AWS_ECR_REPOSITORY_URI}:latest .
       - echo "Pushing Docker image to ECR..."
