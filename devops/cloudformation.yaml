@@ -196,8 +196,7 @@ Resources:
             Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${RepoName}-${Environment}
       ServiceRole: !GetAtt CodeBuildServiceRole.Arn
       Source:
-        Type: GITHUB
-        Location: https://github.com/moovendhanv/test_cognito/tree/main/devops
+        Type: CODEPIPELINE
         BuildSpec: buildspec.yml
       TimeoutInMinutes: 30
 
@@ -221,8 +220,7 @@ Resources:
             Value: !Ref Environment
       ServiceRole: !GetAtt CodeBuildServiceRole.Arn
       Source:
-        Type: GITHUB
-        Location: https://github.com/moovendhanv/test_cognito/tree/main/devops
+        Type: CODEPIPELINE
         BuildSpec: buildspec-deploy.yml
       TimeoutInMinutes: 30
 
