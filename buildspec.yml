@@ -1,40 +1,31 @@
 version: 0.2
+
 phases:
   install:
     runtime-versions:
       nodejs: 18
-      docker: 20
     commands:
-      - echo "Installing AWS CLI v2..."
-      - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-      - unzip awscliv2.zip
-      - sudo ./aws/install
-      - export PATH=$PATH:/usr/local/bin
       - echo "Installing dependencies..."
       - npm install
 
-  pre_build:
-    commands:
-      - echo Logging in to Amazon ECR...
-      - aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ECR_REPOSITORY_URI}
-      - echo Setting environment variables...
-      - IMAGE_TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION}
-      - echo $IMAGE_TAG
-
   build:
     commands:
-      - echo Building Docker image...
-      - docker build -t ${AWS_ECR_REPOSITORY_URI}:${IMAGE_TAG} .
-      - docker tag ${AWS_ECR_REPOSITORY_URI}:${IMAGE_TAG} ${AWS_ECR_REPOSITORY_URI}:latest
+      - echo "Building..."
+      - npm run build
 
   post_build:
     commands:
-      - echo Pushing Docker image to ECR...
-      - docker push ${AWS_ECR_REPOSITORY_URI}:${IMAGE_TAG}
+      - echo "Logging into Amazon ECR..."
+      - aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 698032826194.dkr.ecr.ap-south-1.amazonaws.com
+      - echo "Building Docker image..."
+      - docker build -t ${AWS_ECR_REPOSITORY_URI}:latest .
+      - echo "Pushing Docker image to ECR..."
       - docker push ${AWS_ECR_REPOSITORY_URI}:latest
+      - echo "Docker image pushed to ECR"
       - echo Writing image definitions file...
       - printf '[{"name":"cognito-restore-service","imageUri":"%s"}]' ${AWS_ECR_REPOSITORY_URI}:${IMAGE_TAG} > imagedefinitions.json
+      - cat imagedefinitions.json
 
 artifacts:
-  files: 
+  files:
     - '**/*'
