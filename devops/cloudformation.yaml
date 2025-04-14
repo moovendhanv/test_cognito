@@ -220,7 +220,8 @@ Resources:
             Value: !Ref Environment
       ServiceRole: !GetAtt CodeBuildServiceRole.Arn
       Source:
-        Type: CODEPIPELINE
+        Type: GITHUB
+        Location: https://github.com/moovendhanv/test_cognito/tree/main/devops
         BuildSpec: buildspec-deploy.yml
       TimeoutInMinutes: 30
 
