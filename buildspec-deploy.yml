@@ -1,21 +1,40 @@
 version: 0.2
+
+env:
+  variables:
+    STAGE: dev              # Default stage (can be overridden in CodeBuild env vars)
+    REGION: ap-south-1      # Default region
+
 phases:
   install:
     runtime-versions:
       nodejs: 18
     commands:
-      - echo "Deploying serverless..."
-      - npm install -g serverless
+      - echo "Installing Serverless Framework..."
+      - npm install -g serverless@3
+
+      # Optional: Install project dependencies if needed
+      - echo "Installing project dependencies..."
+      - npm ci
+
+      - echo "Installing Serverless ECR Plugin from GitHub..."
+      - npm install --save-dev https://github.com/serverless/serverless-ecr-plugin
+
+  pre_build:
+    commands:
+      - echo "Logging into AWS ECR..."
+      - aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 698032826194.dkr.ecr.ap-south-1.amazonaws.com
+      - echo "ECR login successful!"
+
   build:
     commands:
-      - echo "Deploying application..."
-      - serverless deploy --stage ${STAGE} --region ${AWS_REGION}
+      - echo "Deploying using Serverless Framework..."
+      - serverless deploy --stage $STAGE --region $REGION --verbose
+
   post_build:
     commands:
-      - echo "Logging into Amazon ECR..."
-      - aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 698032826194.dkr.ecr.ap-south-1.amazonaws.com
-      - echo "Building Docker image..."
-      - docker build -t ${AWS_ECR_REPOSITORY_URI}:latest .
-      - echo "Pushing Docker image to ECR..."
-      - docker push ${AWS_ECR_REPOSITORY_URI}:latest
-      - echo "Docker image pushed to ECR"
+      - echo "Serverless deployment completed."
+
+artifacts:
+  files:
+    - '**/*'
