@@ -39,7 +39,7 @@ provider:
         - Effect: Allow
           Action:
             - s3:GetObject
-          Resource: 'arn:aws:s3:::${self:custom.s3Bucket}/${self:custom.s3Key}'
+          Resource: arn:aws:s3:::${self:custom.s3Bucket}/${self:custom.s3Key}
         - Effect: Allow
           Action:
             - iam:PassRole
@@ -61,14 +61,15 @@ package:
 
 functions:
   imagePusher:
-    handler: scripts/push-image.handler
+    handler: index.handler
     environment:
       ECR_REPOSITORY: ${self:custom.ecrRepository.name}
-      DOCKERFILE_PATH: ./devops/Dockerfile
-      BUILD_PATH: ./devops
+      DOCKERFILE_PATH: ./docker
+      BUILD_PATH: ./docker
 
 resources:
   Resources:
+
     EcrRepository:
       Type: AWS::ECR::Repository
       Properties:
@@ -112,7 +113,7 @@ resources:
                 - Effect: Allow
                   Action:
                     - s3:GetObject
-                  Resource: 'arn:aws:s3:::${self:custom.s3Bucket}/${self:custom.s3Key}'
+                  Resource: arn:aws:s3:::${self:custom.s3Bucket}/${self:custom.s3Key}
 
     FargateJobRole:
       Type: AWS::IAM::Role
@@ -139,7 +140,7 @@ resources:
                 - Effect: Allow
                   Action:
                     - s3:GetObject
-                  Resource: 'arn:aws:s3:::${self:custom.s3Bucket}/${self:custom.s3Key}'
+                  Resource: arn:aws:s3:::${self:custom.s3Bucket}/${self:custom.s3Key}
 
     BatchServiceRole:
       Type: AWS::IAM::Role
@@ -244,11 +245,11 @@ resources:
         Role: !GetAtt AutoSubmitBatchJobRole.Arn
         Code:
           ZipFile: |
-            const AWS = require('aws-sdk');
-            const https = require('https');
-            const url = require('url');
+            import { Batch } from 'aws-sdk';
+            import https from 'https';
+            import { parse } from 'url';
 
-            exports.handler = async (event, context) => {
+            export const handler = async (event, context) => {
               console.log('Auto Submit Batch Job Event:', JSON.stringify(event));
 
               if (event.RequestType === 'Delete') {
@@ -257,7 +258,7 @@ resources:
               }
 
               try {
-                const batch = new AWS.Batch();
+                const batch = new Batch();
                 const params = {
                   jobName: event.ResourceProperties.JobName,
                   jobQueue: event.ResourceProperties.JobQueue,
@@ -288,7 +289,7 @@ resources:
                 Data: data
               });
 
-              const parsedUrl = url.parse(event.ResponseURL);
+              const parsedUrl = parse(event.ResponseURL);
 
               const options = {
                 hostname: parsedUrl.hostname,
@@ -297,7 +298,7 @@ resources:
                 method: 'PUT',
                 headers: {
                   'Content-Type': 'application/json',
-                  'Content-Length': responseBody.length
+                  'Content-Length': Buffer.byteLength(responseBody)
                 }
               };
 
