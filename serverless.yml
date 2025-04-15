@@ -61,7 +61,6 @@ package:
 
 functions:
   imagePusher:
-    handler: index.handler
     image: 698032826194.dkr.ecr.ap-south-1.amazonaws.com/cognito_restore_test-dev:latest
     environment:
       ECR_REPOSITORY: ${self:custom.ecrRepository.name}
