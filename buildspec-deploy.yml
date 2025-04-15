@@ -17,10 +17,6 @@ phases:
       - echo "Installing project dependencies..."
       - npm ci
 
-      - echo "Installing Serverless ECR Plugin from GitHub..."
-      - npm install --save-dev serverless-ecr-plugin
-
-
   pre_build:
     commands:
       - echo "Logging into AWS ECR..."

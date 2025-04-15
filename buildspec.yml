@@ -3,7 +3,7 @@ version: 0.2
 phases:
   install:
     runtime-versions:
-      public.ecr.aws/docker/library/node: 18
+      nodejs: 18
     commands:
       - echo "Installing dependencies..."
       - npm install
