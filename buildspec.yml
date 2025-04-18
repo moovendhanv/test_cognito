@@ -15,9 +15,6 @@ phases:
 
   post_build:
     commands:
-      - echo "Uploading nested stack templates to S3..."
-      - aws s3 cp ./templates/vpc-exports.yaml s3://${S3Bucket}/${EXPORTS_KEY}
-      
       - echo "Logging into Amazon ECR..."
       - aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 698032826194.dkr.ecr.ap-south-1.amazonaws.com
       
