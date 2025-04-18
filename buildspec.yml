@@ -15,13 +15,19 @@ phases:
 
   post_build:
     commands:
+      - echo "Uploading nested stack templates to S3..."
+      - aws s3 cp ./templates/vpc-exports.yaml s3://${S3Bucket}/${EXPORTS_KEY}
+      
       - echo "Logging into Amazon ECR..."
       - aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 698032826194.dkr.ecr.ap-south-1.amazonaws.com
+      
       - echo "Building Docker image..."
       - docker build -t ${AWS_ECR_REPOSITORY_URI}:latest .
+      
       - echo "Pushing Docker image to ECR..."
       - docker push ${AWS_ECR_REPOSITORY_URI}:latest
       - echo "Docker image pushed to ECR"
+
       - echo Writing image definitions file...
       - printf '[{"name":"cognito-restore-service","imageUri":"%s"}]' ${AWS_ECR_REPOSITORY_URI}:${IMAGE_TAG} > imagedefinitions.json
       - cat imagedefinitions.json

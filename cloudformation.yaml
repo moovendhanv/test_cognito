@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: CodePipeline CFN Stack for 'cognito-restore-service' micro-service
+Description: CodePipeline CFN Stack for 'cognito-restore-service' micro-service with VPC
 
 Parameters:
   Prefix:
@@ -54,12 +54,122 @@ Parameters:
     Type: String
     Default: "false"
     AllowedValues: ["true", "false"]
+  VpcCIDR:
+    Type: String
+    Default: '10.0.0.0/16'
+    Description: CIDR block for the VPC
+  PublicSubnet1CIDR:
+    Type: String
+    Default: '10.0.1.0/24'
+    Description: CIDR block for public subnet 1
+  PublicSubnet2CIDR:
+    Type: String
+    Default: '10.0.2.0/24'
+    Description: CIDR block for public subnet 2
 
 Conditions:
   IsS3BucketExistsCondition: !Equals [!Ref IsS3BucketExists, "true"]
 
 Resources:
+  # VPC Resources
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${Prefix}-${Environment}-vpc
 
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${Prefix}-${Environment}-igw
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Ref PublicSubnet1CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${Prefix}-${Environment}-public-subnet-1
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Ref PublicSubnet2CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${Prefix}-${Environment}-public-subnet-2
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Prefix}-${Environment}-public-route-table
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+
+  DefaultSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Default security group for Cognito Restore Service
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${Prefix}-${Environment}-sg
+
+  # Export VPC resources for use in Serverless Framework
+  VpcResourcesExport:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.amazonaws.com/your-templates-bucket/vpc-exports.yaml
+      Parameters:
+        VpcId: !Ref VPC
+        PublicSubnet1Id: !Ref PublicSubnet1
+        PublicSubnet2Id: !Ref PublicSubnet2
+        DefaultSecurityGroupId: !Ref DefaultSecurityGroup
+      TimeoutInMinutes: 10
+
+  # CodePipeline Resources
   CodePipelineArtifactBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -280,9 +390,34 @@ Resources:
               RunOrder: 1
 
 Outputs:
+  VpcId:
+    Description: The ID of the VPC
+    Value: !Ref VPC
+    Export:
+      Name: VpcId
+
+  PublicSubnet1:
+    Description: The ID of the first public subnet
+    Value: !Ref PublicSubnet1
+    Export:
+      Name: PublicSubnet1
+
+  PublicSubnet2:
+    Description: The ID of the second public subnet
+    Value: !Ref PublicSubnet2
+    Export:
+      Name: PublicSubnet2
+
+  DefaultSecurityGroup:
+    Description: The ID of the default security group
+    Value: !Ref DefaultSecurityGroup
+    Export:
+      Name: DefaultSecurityGroup
+
   PipelineURL:
     Description: URL to the CodePipeline console
     Value: !Sub https://console.aws.amazon.com/codepipeline/home?region=${AWS::Region}#/view/${RepoName}-${Environment}-pipeline
+  
   ECRRepositoryURL:
     Description: URL to the ECR Repository
     Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${RepoName}-${Environment}

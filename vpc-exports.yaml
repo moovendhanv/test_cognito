@@ -1,0 +1,44 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'VPC Resource Exports for Serverless'
+
+Parameters:
+  VpcId:
+    Type: String
+    Description: ID of the VPC
+  PublicSubnet1Id:
+    Type: String
+    Description: ID of the first public subnet
+  PublicSubnet2Id:
+    Type: String
+    Description: ID of the second public subnet
+  DefaultSecurityGroupId:
+    Type: String
+    Description: ID of the default security group
+
+Resources:
+  # This template doesn't create any resources, just exports the parameters
+
+Outputs:
+  VpcId:
+    Description: The ID of the VPC
+    Value: !Ref VpcId
+    Export:
+      Name: VpcId
+
+  PublicSubnet1:
+    Description: The ID of the first public subnet
+    Value: !Ref PublicSubnet1Id
+    Export:
+      Name: PublicSubnet1
+
+  PublicSubnet2:
+    Description: The ID of the second public subnet
+    Value: !Ref PublicSubnet2Id
+    Export:
+      Name: PublicSubnet2
+
+  DefaultSecurityGroup:
+    Description: The ID of the default security group
+    Value: !Ref DefaultSecurityGroupId
+    Export:
+      Name: DefaultSecurityGroup
