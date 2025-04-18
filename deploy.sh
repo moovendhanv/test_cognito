@@ -43,5 +43,6 @@ sam deploy -t cloudformation.yaml \
         ParameterKey=S3Bucket,ParameterValue="${S3Bucket}" \
         ParameterKey=S3Key,ParameterValue="${S3Key}" \
         ParameterKey=UserPoolId,ParameterValue="${UserPoolId}" \
-        ParameterKey=IsS3BucketExists,ParameterValue=true
-
+        ParameterKey=IsS3BucketExists,ParameterValue=true\
+        ParameterKey=ProjectName,ParameterValue=${ProjectName} \
+        ParameterKey=EnvironmentName,ParameterValue=${EnvironmentName}

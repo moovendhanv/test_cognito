@@ -113,10 +113,12 @@ Resources:
       Source:
         Type: CODEPIPELINE
       VpcConfig:
-        VpcId: !Ref VPC
+        VpcId: !ImportValue VpcId
         Subnets:
-          - !Ref PublicSubnet
-        SecurityGroupIds: []
+          - !ImportValue PublicSubnet1
+          - !ImportValue PublicSubnet2
+        SecurityGroupIds:
+          - !ImportValue DefaultSecurityGroup
       TimeoutInMinutes: 10
 
   CodeBuildProjectDeploy:
@@ -137,12 +139,12 @@ Resources:
           - Name: AWS_ACCOUNT_ID
             Value: !Sub "${AWS::AccountId}"
       Source:
-        Type: CODEPIPELINE
-      VpcConfig:
-        VpcId: !Ref VPC
+        VpcId: !ImportValue VpcId
         Subnets:
-          - !Ref PublicSubnet
-        SecurityGroupIds: []
+          - !ImportValue PublicSubnet1
+          - !ImportValue PublicSubnet2
+        SecurityGroupIds:
+          - !ImportValue DefaultSecurityGroup
       TimeoutInMinutes: 10
 
   PipelineRole:
