@@ -161,7 +161,7 @@ Resources:
   VpcResourcesExport:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: https://s3.amazonaws.com/your-templates-bucket/vpc-exports.yaml
+      TemplateURL: https://cognito-backup-bucket-test-s3.s3.ap-south-1.amazonaws.com/vpc-exports.yaml
       Parameters:
         VpcId: !Ref VPC
         PublicSubnet1Id: !Ref PublicSubnet1
