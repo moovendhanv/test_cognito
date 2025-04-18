@@ -1,5 +1,3 @@
-service: cognito-restore-service
-
 frameworkVersion: '3'
 
 provider:
@@ -69,7 +67,70 @@ functions:
 
 resources:
   Resources:
+    # Create VPC
+    VPC:
+      Type: AWS::EC2::VPC
+      Properties:
+        CidrBlock: "10.0.0.0/16"
+        EnableDnsSupport: true
+        EnableDnsHostnames: true
+        Tags:
+          - Key: Name
+            Value: ${self:service}-${self:provider.stage}-vpc
 
+    # Create Subnets
+    Subnet1:
+      Type: AWS::EC2::Subnet
+      Properties:
+        VpcId: !Ref VPC
+        CidrBlock: "10.0.1.0/24"
+        AvailabilityZone: ${self:provider.region}a
+        MapPublicIpOnLaunch: true
+        Tags:
+          - Key: Name
+            Value: ${self:service}-${self:provider.stage}-subnet1
+
+    Subnet2:
+      Type: AWS::EC2::Subnet
+      Properties:
+        VpcId: !Ref VPC
+        CidrBlock: "10.0.2.0/24"
+        AvailabilityZone: ${self:provider.region}b
+        MapPublicIpOnLaunch: true
+        Tags:
+          - Key: Name
+            Value: ${self:service}-${self:provider.stage}-subnet2
+
+    # Create Internet Gateway
+    InternetGateway:
+      Type: AWS::EC2::InternetGateway
+      Properties:
+        Tags:
+          - Key: Name
+            Value: ${self:service}-${self:provider.stage}-igw
+
+    AttachGateway:
+      Type: AWS::EC2::VPCGatewayAttachment
+      Properties:
+        VpcId: !Ref VPC
+        InternetGatewayId: !Ref InternetGateway
+
+    # Create Security Group
+    VpcSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: Allow access to Batch
+        VpcId: !Ref VPC
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: '80'
+            ToPort: '80'
+            CidrIp: "0.0.0.0/0"
+        Tags:
+          - Key: Name
+            Value: ${self:service}-${self:provider.stage}-sg
+
+    # ECR Repository (already defined)
     EcrRepository:
       Type: AWS::ECR::Repository
       Properties:
@@ -93,6 +154,7 @@ resources:
               ]
             }
 
+    # Fargate Execution Role (already defined)
     FargateExecutionRole:
       Type: AWS::IAM::Role
       Properties:
@@ -115,6 +177,7 @@ resources:
                     - s3:GetObject
                   Resource: arn:aws:s3:::${self:custom.s3Bucket}/${self:custom.s3Key}
 
+    # Fargate Job Role (already defined)
     FargateJobRole:
       Type: AWS::IAM::Role
       Properties:
@@ -142,6 +205,7 @@ resources:
                     - s3:GetObject
                   Resource: arn:aws:s3:::${self:custom.s3Bucket}/${self:custom.s3Key}
 
+    # Batch service role (already defined)
     BatchServiceRole:
       Type: AWS::IAM::Role
       Properties:
@@ -155,6 +219,7 @@ resources:
         ManagedPolicyArns:
           - arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole
 
+    # Batch Compute Environment (updated with VPC)
     BatchComputeEnvironment:
       Type: AWS::Batch::ComputeEnvironment
       Properties:
@@ -166,11 +231,12 @@ resources:
           Type: FARGATE
           MaxvCpus: 4
           Subnets:
-            - Fn::ImportValue: PublicSubnet1
-            - Fn::ImportValue: PublicSubnet2
+            - Ref: Subnet1
+            - Ref: Subnet2
           SecurityGroupIds:
-            - Fn::ImportValue: DefaultSecurityGroup
+            - Ref: VpcSecurityGroup
 
+    # Batch Job Queue (already defined)
     BatchJobQueue:
       Type: AWS::Batch::JobQueue
       Properties:
@@ -181,6 +247,7 @@ resources:
           - Order: 1
             ComputeEnvironment: !Ref BatchComputeEnvironment
 
+    # Batch Job Definition (already defined)
     BatchJobDefinition:
       Type: AWS::Batch::JobDefinition
       Properties:
@@ -215,129 +282,6 @@ resources:
               awslogs-region: ${self:provider.region}
               awslogs-stream-prefix: cognito-restore
               awslogs-create-group: "true"
-
-    AutoSubmitBatchJob:
-      Type: Custom::AutoSubmitBatchJob
-      DependsOn:
-        - BatchJobDefinition
-        - BatchJobQueue
-      Properties:
-        ServiceToken: !GetAtt AutoSubmitBatchJobFunction.Arn
-        JobDefinition: !Ref BatchJobDefinition
-        JobQueue: !Ref BatchJobQueue
-        JobName: cognito-restore-job
-        Environment:
-          - Name: NEW_USER_POOL_ID
-            Value: ${self:custom.userPoolId}
-          - Name: REGION
-            Value: ${self:provider.region}
-          - Name: S3_BUCKET
-            Value: ${self:custom.s3Bucket}
-          - Name: S3_KEY
-            Value: ${self:custom.s3Key}
-
-    AutoSubmitBatchJobFunction:
-      Type: AWS::Lambda::Function
-      Properties:
-        Handler: index.handler
-        Runtime: nodejs18.x
-        Timeout: 300
-        Role: !GetAtt AutoSubmitBatchJobRole.Arn
-        Code:
-          ZipFile: |
-            import { Batch } from 'aws-sdk';
-            import https from 'https';
-            import { parse } from 'url';
-
-            export const handler = async (event, context) => {
-              console.log('Auto Submit Batch Job Event:', JSON.stringify(event));
-
-              if (event.RequestType === 'Delete') {
-                await sendResponse(event, context, 'SUCCESS');
-                return;
-              }
-
-              try {
-                const batch = new Batch();
-                const params = {
-                  jobName: event.ResourceProperties.JobName,
-                  jobQueue: event.ResourceProperties.JobQueue,
-                  jobDefinition: event.ResourceProperties.JobDefinition,
-                  containerOverrides: {
-                    environment: event.ResourceProperties.Environment
-                  }
-                };
-
-                const result = await batch.submitJob(params).promise();
-                console.log('Batch job submitted:', result.jobId);
-
-                await sendResponse(event, context, 'SUCCESS', { JobId: result.jobId });
-              } catch (error) {
-                console.error('Error submitting batch job:', error);
-                await sendResponse(event, context, 'FAILED', null, error.message);
-              }
-            };
-
-            async function sendResponse(event, context, status, data = null, reason = null) {
-              const responseBody = JSON.stringify({
-                Status: status,
-                Reason: reason || 'See CloudWatch logs for details',
-                PhysicalResourceId: context.logStreamName,
-                StackId: event.StackId,
-                RequestId: event.RequestId,
-                LogicalResourceId: event.LogicalResourceId,
-                Data: data
-              });
-
-              const parsedUrl = parse(event.ResponseURL);
-
-              const options = {
-                hostname: parsedUrl.hostname,
-                port: 443,
-                path: parsedUrl.path,
-                method: 'PUT',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Content-Length': Buffer.byteLength(responseBody)
-                }
-              };
-
-              return new Promise((resolve, reject) => {
-                const req = https.request(options, (res) => {
-                  console.log(`CloudFormation response status code: ${res.statusCode}`);
-                  resolve();
-                });
-
-                req.on('error', (error) => {
-                  console.error('Error sending response to CloudFormation:', error);
-                  reject(error);
-                });
-
-                req.write(responseBody);
-                req.end();
-              });
-            }
-
-    AutoSubmitBatchJobRole:
-      Type: AWS::IAM::Role
-      Properties:
-        AssumeRolePolicyDocument:
-          Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Principal:
-                Service: lambda.amazonaws.com
-              Action: sts:AssumeRole
-        ManagedPolicyArns:
-          - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        Policies:
-          - PolicyName: BatchJobSubmissionPolicy
-            PolicyDocument:
-              Version: '2012-10-17'
-              Statement:
-                - Effect: Allow
-                  Action: batch:SubmitJob
-                  Resource: '*'
 
 outputs:
   EcrRepositoryUri:
