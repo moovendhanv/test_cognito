@@ -1,5 +1,10 @@
 version: 0.2
 
+env:
+  variables:
+    AWS_ECR_REPOSITORY_URI: "698032826194.dkr.ecr.ap-south-1.amazonaws.com/cognito_restore_test-dev:latest"  # Set ECR URI directly here
+    IMAGE_TAG: "latest"  # Or any versioning strategy you follow
+
 phases:
   install:
     runtime-versions:
@@ -17,15 +22,13 @@ phases:
     commands:
       - echo "Logging into Amazon ECR..."
       - aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 698032826194.dkr.ecr.ap-south-1.amazonaws.com
-      
       - echo "Building Docker image..."
-      - docker build -t ${AWS_ECR_REPOSITORY_URI}:latest .
-      
+      - docker build -t ${AWS_ECR_REPOSITORY_URI}:${IMAGE_TAG} .
       - echo "Pushing Docker image to ECR..."
-      - docker push ${AWS_ECR_REPOSITORY_URI}:latest
+      - docker push ${AWS_ECR_REPOSITORY_URI}:${IMAGE_TAG}
       - echo "Docker image pushed to ECR"
 
-      - echo Writing image definitions file...
+      - echo "Writing image definitions file..."
       - printf '[{"name":"cognito-restore-service","imageUri":"%s"}]' ${AWS_ECR_REPOSITORY_URI}:${IMAGE_TAG} > imagedefinitions.json
       - cat imagedefinitions.json
 
