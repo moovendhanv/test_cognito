@@ -45,7 +45,7 @@ provider:
 
 custom:
   ecrRepository:
-    name: ${self:service}-${self:provider.stage}
+    name: cognito_restore_test-dev
   s3Bucket: ${opt:bucket, 'cognito-backup-bucket'}
   s3Key: ${opt:key, 'cognito-backup.json'}
   userPoolId: ${opt:userPoolId, 'ap-south-1_OpPrIODGO'}
