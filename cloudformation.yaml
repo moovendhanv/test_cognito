@@ -1,177 +1,242 @@
-AWSTemplateFormatVersion: "2010-09-09"
-Description: CI/CD pipeline for cognito-restore-service
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CodePipeline CFN Stack for 'cognito-restore-service' micro-service
 
 Parameters:
-  ProjectName:
+  Prefix:
     Type: String
-  EnvironmentName:
+    Default: 'cognito-restore'
+  Environment:
     Type: String
+    Default: 'dev'
   GitHubOwner:
     Type: String
+    Default: 'Blueshirt-work'
   GitHubRepositoryName:
     Type: String
+    Default: 'test_cognito'
+  RepoName:
+    Type: String
+    Default: 'cognito_restore_test'
   GitBranch:
     Type: String
-    Default: main
+    Default: 'main'
+  Region:
+    Type: String
+    Default: 'ap-south-1'
+  ResourceStackName:
+    Type: String
+    Default: 'cognito-restore-service-dev-stack'
+  PipelineArtifactBucket:
+    Type: String
+    Default: 'restore-dev-pipeline-artifactsbucket'
   CodeStarConnectionArn:
     Type: String
+    Default: 'arn:aws:codeconnections:ap-south-1:698032826194:connection/1a46d7fe-b424-4e8f-a61c-1b32b52173d7'
+  Stage:
+    Type: String
+    Default: 'dev'
+  S3Bucket:
+    Type: String
+    Default: 'cognito-backup-bucket-test-s3'
+  S3Key:
+    Type: String
+    Default: 'cognito-users-backup.json'
+  UserPoolId:
+    Type: String
+    Default: 'ap-south-1_OpPrIODGO'
+  XrayEnabled:
+    Type: String
+    Default: 'true'
+  Tags:
+    Type: String
+    Default: 'Project=CognitoRestore Service=Serverless'
+  IsS3BucketExists:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+
+Conditions:
+  IsS3BucketExistsCondition: !Equals [!Ref IsS3BucketExists, "true"]
 
 Resources:
 
   CodePipelineArtifactBucket:
     Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
     Properties:
-      BucketName: !Sub '${ProjectName}-${EnvironmentName}-pipeline-artifacts'
+      BucketName: !Sub '${Prefix}-${Environment}-pipe-${AWS::AccountId}'
 
-  ECRRepository:
-    Type: AWS::ECR::Repository
+  PipelineArtifactsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
     Properties:
-      RepositoryName: !Sub '${ProjectName}-${EnvironmentName}'
-      ImageScanningConfiguration:
-        scanOnPush: true
+      Bucket: !Ref CodePipelineArtifactBucket
+      PolicyDocument:
+        Statement:
+          - Effect: 'Deny'
+            Action: 's3:*'
+            Principal: '*'
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}
+              - !Sub arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+          - Effect: Allow
+            Action: s3:*
+            Principal:
+              AWS:
+                - !GetAtt CodePipelineExecutionRole.Arn
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}
+              - !Sub arn:${AWS::Partition}:s3:::${CodePipelineArtifactBucket}/*
 
-  VPC:
-    Type: AWS::EC2::VPC
+  CodePipelineExecutionRole:
+    Type: AWS::IAM::Role
     Properties:
-      CidrBlock: 10.0.0.0/16
-      EnableDnsSupport: true
-      EnableDnsHostnames: true
-      Tags:
-        - Key: Name
-          Value: !Sub '${ProjectName}-${EnvironmentName}-vpc'
-
-  InternetGateway:
-    Type: AWS::EC2::InternetGateway
-
-  AttachGateway:
-    Type: AWS::EC2::VPCGatewayAttachment
-    Properties:
-      VpcId: !Ref VPC
-      InternetGatewayId: !Ref InternetGateway
-
-  PublicSubnet:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref VPC
-      CidrBlock: 10.0.0.0/24
-      MapPublicIpOnLaunch: true
-      AvailabilityZone: !Select [0, !GetAZs '']
-      Tags:
-        - Key: Name
-          Value: !Sub '${ProjectName}-${EnvironmentName}-public-subnet'
-
-  RouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref VPC
-
-  Route:
-    Type: AWS::EC2::Route
-    DependsOn: AttachGateway
-    Properties:
-      RouteTableId: !Ref RouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      GatewayId: !Ref InternetGateway
-
-  SubnetRouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PublicSubnet
-      RouteTableId: !Ref RouteTable
+      RoleName: !Sub ${Prefix}-${Environment}-CodePipelineRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: 'sts:AssumeRole'
+            Principal:
+              Service: codepipeline.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
 
   CodeBuildServiceRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: !Sub ${Prefix}-${Environment}-CodeBuildRole
       AssumeRolePolicyDocument:
-        Version: "2012-10-17"
+        Version: '2012-10-17'
         Statement:
           - Effect: Allow
+            Action: 'sts:AssumeRole'
             Principal:
               Service: codebuild.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AdministratorAccess
+      Policies:
+        - PolicyName: CodeBuildServicePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                  - "s3:GetObjectVersion"
+                  - "s3:PutObject"
+                Resource:
+                  - !Sub arn:aws:s3:::${CodePipelineArtifactBucket}/*
+              - Effect: Allow
+                Action:
+                  - "ecr:GetAuthorizationToken"
+                  - "ecr:BatchCheckLayerAvailability"
+                  - "ecr:GetDownloadUrlForLayer"
+                  - "ecr:BatchGetImage"
+                  - "ecr:InitiateLayerUpload"
+                  - "ecr:UploadLayerPart"
+                  - "ecr:CompleteLayerUpload"
+                  - "ecr:PutImage"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "cloudformation:*"
+                  - "iam:PassRole"
+                Resource: "*"
+
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${RepoName}-${Environment}
+      EmptyOnDelete: false
+      ImageTagMutability: MUTABLE
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep only the last 5 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 5
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
 
   CodeBuildProjectBuildAndPackage:
     Type: AWS::CodeBuild::Project
     Properties:
-      Name: !Sub '${ProjectName}-${EnvironmentName}-build-package'
-      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Name: !Sub '${Prefix}-${Environment}-BuildPackage'
       Artifacts:
         Type: CODEPIPELINE
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:7.0
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
         PrivilegedMode: true
         EnvironmentVariables:
-          - Name: ENVIRONMENT
-            Value: !Ref EnvironmentName
+          - Name: REGION
+            Value: !Ref Region
+          - Name: AWS_REGION
+            Value: !Ref Region
           - Name: AWS_ACCOUNT_ID
-            Value: !Sub "${AWS::AccountId}"
+            Value: !Ref AWS::AccountId
+          - Name: AWS_ECR_REPOSITORY_URI
+            Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${RepoName}-${Environment}
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
       Source:
         Type: CODEPIPELINE
-      VpcConfig:
-        VpcId: !ImportValue VpcId
-        Subnets:
-          - !ImportValue PublicSubnet1
-          - !ImportValue PublicSubnet2
-        SecurityGroupIds:
-          - !ImportValue DefaultSecurityGroup
-      TimeoutInMinutes: 10
+        BuildSpec: buildspec.yml
+      TimeoutInMinutes: 30
 
   CodeBuildProjectDeploy:
     Type: AWS::CodeBuild::Project
     Properties:
-      Name: !Sub '${ProjectName}-${EnvironmentName}-deploy'
-      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Name: !Sub '${Prefix}-${Environment}-Deploy'
       Artifacts:
         Type: CODEPIPELINE
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:7.0
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
         PrivilegedMode: true
         EnvironmentVariables:
-          - Name: ENVIRONMENT
-            Value: !Ref EnvironmentName
-          - Name: AWS_ACCOUNT_ID
-            Value: !Sub "${AWS::AccountId}"
+          - Name: AWS_REGION
+            Value: !Ref Region
+          - Name: AWS_ECR_REPOSITORY_URI
+            Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${RepoName}-${Environment}
+          - Name: STAGE
+            Value: !Ref Environment
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
       Source:
-        VpcId: !ImportValue VpcId
-        Subnets:
-          - !ImportValue PublicSubnet1
-          - !ImportValue PublicSubnet2
-        SecurityGroupIds:
-          - !ImportValue DefaultSecurityGroup
-      TimeoutInMinutes: 10
-
-  PipelineRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: codepipeline.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AdministratorAccess
+        Type: CODEPIPELINE
+        BuildSpec: buildspec-deploy.yml
+      TimeoutInMinutes: 30
 
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
-      Name: !Sub '${ProjectName}-${EnvironmentName}-pipeline'
-      RoleArn: !GetAtt PipelineRole.Arn
+      Name: !Sub '${RepoName}-${Environment}-pipeline'
       ArtifactStore:
         Type: S3
         Location: !Ref CodePipelineArtifactBucket
+      RoleArn: !GetAtt CodePipelineExecutionRole.Arn
+      RestartExecutionOnUpdate: true
       Stages:
         - Name: Source
           Actions:
-            - Name: GitHub_Source
+            - Name: SourceCodeRepo
               ActionTypeId:
                 Category: Source
                 Owner: AWS
@@ -179,52 +244,45 @@ Resources:
                 Version: "1"
               Configuration:
                 ConnectionArn: !Ref CodeStarConnectionArn
-                FullRepositoryId: !Sub ${GitHubOwner}/${GitHubRepositoryName}
+                FullRepositoryId: !Sub "${GitHubOwner}/${GitHubRepositoryName}"
                 BranchName: !Ref GitBranch
                 OutputArtifactFormat: CODE_ZIP
               OutputArtifacts:
-                - Name: SourceArtifact
+                - Name: SourceCodeAsZip
               RunOrder: 1
-
-        - Name: Build
+        - Name: BuildAndPackage
           Actions:
-            - Name: BuildAndPackage
+            - Name: CodeBuild
               ActionTypeId:
                 Category: Build
                 Owner: AWS
                 Provider: CodeBuild
-                Version: "1"
-              InputArtifacts:
-                - Name: SourceArtifact
-              OutputArtifacts:
-                - Name: BuildArtifact
+                Version: '1'
+              RunOrder: 1
               Configuration:
                 ProjectName: !Ref CodeBuildProjectBuildAndPackage
-              RunOrder: 1
-
+              InputArtifacts:
+                - Name: SourceCodeAsZip
+              OutputArtifacts:
+                - Name: BuildArtifactAsZip
         - Name: Deploy
           Actions:
-            - Name: DeployToEnv
+            - Name: DeployServerless
               ActionTypeId:
                 Category: Build
                 Owner: AWS
                 Provider: CodeBuild
-                Version: "1"
-              InputArtifacts:
-                - Name: BuildArtifact
+                Version: '1'
               Configuration:
                 ProjectName: !Ref CodeBuildProjectDeploy
+              InputArtifacts:
+                - Name: BuildArtifactAsZip
               RunOrder: 1
 
 Outputs:
-  CodePipelineName:
-    Description: Name of the created CodePipeline
-    Value: !Ref Pipeline
-
-  ArtifactBucket:
-    Description: Artifact bucket used for storing CodePipeline files
-    Value: !Ref CodePipelineArtifactBucket
-
-  ECRRepoName:
-    Description: Name of the created ECR repository
-    Value: !Ref ECRRepository
+  PipelineURL:
+    Description: URL to the CodePipeline console
+    Value: !Sub https://console.aws.amazon.com/codepipeline/home?region=${AWS::Region}#/view/${RepoName}-${Environment}-pipeline
+  ECRRepositoryURL:
+    Description: URL to the ECR Repository
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${RepoName}-${Environment}
