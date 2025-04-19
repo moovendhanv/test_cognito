@@ -47,10 +47,11 @@ provider:
 custom:
   namePrefix: ${self:service}-${self:provider.stage}
   ecrRepository:
-    name: cognito_restore_test-dev
+    name: cognito_restore_test-${self:provider.stage}
   s3Bucket: ${opt:bucket, 'cognito-backup-bucket'}
   s3Key: ${opt:key, 'cognito-backup.json'}
   userPoolId: ${opt:userPoolId, 'ap-south-1_OpPrIODGO'}
+  ecrRepositoryUri: ${cf:cognito-restore-codepipeline.EcrRepositoryUri}
 
 package:
   individually: true
@@ -84,7 +85,7 @@ resources:
       Properties:
         VpcId: !Ref VPC
         CidrBlock: "10.0.1.0/24"
-        AvailabilityZone: ${self:provider.region}a
+        AvailabilityZone: !Sub "${self:provider.region}a"
         MapPublicIpOnLaunch: true
         Tags:
           - Key: Name
@@ -95,7 +96,7 @@ resources:
       Properties:
         VpcId: !Ref VPC
         CidrBlock: "10.0.2.0/24"
-        AvailabilityZone: ${self:provider.region}b
+        AvailabilityZone: !Sub "${self:provider.region}b"
         MapPublicIpOnLaunch: true
         Tags:
           - Key: Name
@@ -127,29 +128,6 @@ resources:
         Tags:
           - Key: Name
             Value: ${self:custom.namePrefix}-sg
-
-    EcrRepository:
-      Type: AWS::ECR::Repository
-      Properties:
-        RepositoryName: ${self:custom.ecrRepository.name}
-        LifecyclePolicy:
-          LifecyclePolicyText: |
-            {
-              "rules": [
-                {
-                  "rulePriority": 1,
-                  "description": "Keep only the last 5 images",
-                  "selection": {
-                    "tagStatus": "any",
-                    "countType": "imageCountMoreThan",
-                    "countNumber": 5
-                  },
-                  "action": {
-                    "type": "expire"
-                  }
-                }
-              ]
-            }
 
     FargateExecutionRole:
       Type: AWS::IAM::Role
@@ -200,7 +178,6 @@ resources:
                     - s3:GetObject
                   Resource: arn:aws:s3:::${self:custom.s3Bucket}/${self:custom.s3Key}
 
-    # Batch service role 
     BatchServiceRole:
       Type: AWS::IAM::Role
       Properties:
@@ -214,14 +191,13 @@ resources:
         ManagedPolicyArns:
           - arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole
 
-    # Batch Compute Environment 
     BatchComputeEnvironment:
       Type: AWS::Batch::ComputeEnvironment
       Properties:
         Type: MANAGED
         State: ENABLED
         ServiceRole: !GetAtt BatchServiceRole.Arn
-        ComputeEnvironmentName: ${self:service}-${self:provider.stage}-env
+        ComputeEnvironmentName: ${self:custom.namePrefix}-env
         ComputeResources:
           Type: FARGATE
           MaxvCpus: 4
@@ -231,22 +207,20 @@ resources:
           SecurityGroupIds:
             - Ref: VpcSecurityGroup
 
-    # Batch Job Queue 
     BatchJobQueue:
       Type: AWS::Batch::JobQueue
       Properties:
-        JobQueueName: ${self:service}-${self:provider.stage}-queue
+        JobQueueName: ${self:custom.namePrefix}-queue
         State: ENABLED
         Priority: 1
         ComputeEnvironmentOrder:
           - Order: 1
             ComputeEnvironment: !Ref BatchComputeEnvironment
 
-    # Batch Job Definition 
     BatchJobDefinition:
       Type: AWS::Batch::JobDefinition
       Properties:
-        JobDefinitionName: ${self:service}-${self:provider.stage}-job-def
+        JobDefinitionName: ${self:custom.namePrefix}-job-def
         Type: container
         PlatformCapabilities:
           - FARGATE
@@ -273,7 +247,7 @@ resources:
           LogConfiguration:
             LogDriver: awslogs
             Options:
-              awslogs-group: /aws/batch/${self:service}-${self:provider.stage}
+              awslogs-group: /aws/batch/${self:custom.namePrefix}
               awslogs-region: ${self:provider.region}
               awslogs-stream-prefix: cognito-restore
 
@@ -281,12 +255,15 @@ outputs:
   EcrRepositoryUri:
     Description: ECR Repository URI
     Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${self:custom.ecrRepository.name}
+
   JobQueueArn:
     Description: The ARN of the Batch Job Queue
     Value: !Ref BatchJobQueue
+
   JobDefinitionArn:
     Description: The ARN of the Batch Job Definition
     Value: !Ref BatchJobDefinition
 
 plugins:
+  # Uncomment if you're using specific plugins
   # - serverless-aws-resource-names
