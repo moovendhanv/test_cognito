@@ -1,3 +1,4 @@
+service: cognito-restore-service
 frameworkVersion: '3'
 
 provider:
@@ -44,6 +45,7 @@ provider:
           Resource: '*'
 
 custom:
+  namePrefix: ${self:service}-${self:provider.stage}
   ecrRepository:
     name: cognito_restore_test-dev
   s3Bucket: ${opt:bucket, 'cognito-backup-bucket'}
@@ -59,7 +61,7 @@ package:
 
 functions:
   imagePusher:
-    image: 698032826194.dkr.ecr.ap-south-1.amazonaws.com/cognito_restore_test-dev:latest
+    image: ${aws:accountId}.dkr.ecr.${self:provider.region}.amazonaws.com/${self:custom.ecrRepository.name}:latest
     environment:
       ECR_REPOSITORY: ${self:custom.ecrRepository.name}
       DOCKERFILE_PATH: ./docker
@@ -67,7 +69,6 @@ functions:
 
 resources:
   Resources:
-    # Create VPC
     VPC:
       Type: AWS::EC2::VPC
       Properties:
@@ -76,9 +77,8 @@ resources:
         EnableDnsHostnames: true
         Tags:
           - Key: Name
-            Value: ${self:service}-${self:provider.stage}-vpc
+            Value: ${self:custom.namePrefix}-vpc
 
-    # Create Subnets
     Subnet1:
       Type: AWS::EC2::Subnet
       Properties:
@@ -88,7 +88,7 @@ resources:
         MapPublicIpOnLaunch: true
         Tags:
           - Key: Name
-            Value: ${self:service}-${self:provider.stage}-subnet1
+            Value: ${self:custom.namePrefix}-subnet1
 
     Subnet2:
       Type: AWS::EC2::Subnet
@@ -99,15 +99,14 @@ resources:
         MapPublicIpOnLaunch: true
         Tags:
           - Key: Name
-            Value: ${self:service}-${self:provider.stage}-subnet2
+            Value: ${self:custom.namePrefix}-subnet2
 
-    # Create Internet Gateway
     InternetGateway:
       Type: AWS::EC2::InternetGateway
       Properties:
         Tags:
           - Key: Name
-            Value: ${self:service}-${self:provider.stage}-igw
+            Value: ${self:custom.namePrefix}-igw
 
     AttachGateway:
       Type: AWS::EC2::VPCGatewayAttachment
@@ -115,7 +114,6 @@ resources:
         VpcId: !Ref VPC
         InternetGatewayId: !Ref InternetGateway
 
-    # Create Security Group
     VpcSecurityGroup:
       Type: AWS::EC2::SecurityGroup
       Properties:
@@ -123,14 +121,13 @@ resources:
         VpcId: !Ref VPC
         SecurityGroupIngress:
           - IpProtocol: tcp
-            FromPort: '80'
-            ToPort: '80'
+            FromPort: 80
+            ToPort: 80
             CidrIp: "0.0.0.0/0"
         Tags:
           - Key: Name
-            Value: ${self:service}-${self:provider.stage}-sg
+            Value: ${self:custom.namePrefix}-sg
 
-    # ECR Repository (already defined)
     EcrRepository:
       Type: AWS::ECR::Repository
       Properties:
@@ -154,7 +151,6 @@ resources:
               ]
             }
 
-    # Fargate Execution Role (already defined)
     FargateExecutionRole:
       Type: AWS::IAM::Role
       Properties:
@@ -177,7 +173,6 @@ resources:
                     - s3:GetObject
                   Resource: arn:aws:s3:::${self:custom.s3Bucket}/${self:custom.s3Key}
 
-    # Fargate Job Role (already defined)
     FargateJobRole:
       Type: AWS::IAM::Role
       Properties:
@@ -205,7 +200,7 @@ resources:
                     - s3:GetObject
                   Resource: arn:aws:s3:::${self:custom.s3Bucket}/${self:custom.s3Key}
 
-    # Batch service role (already defined)
+    # Batch service role 
     BatchServiceRole:
       Type: AWS::IAM::Role
       Properties:
@@ -219,7 +214,7 @@ resources:
         ManagedPolicyArns:
           - arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole
 
-    # Batch Compute Environment (updated with VPC)
+    # Batch Compute Environment 
     BatchComputeEnvironment:
       Type: AWS::Batch::ComputeEnvironment
       Properties:
@@ -236,7 +231,7 @@ resources:
           SecurityGroupIds:
             - Ref: VpcSecurityGroup
 
-    # Batch Job Queue (already defined)
+    # Batch Job Queue 
     BatchJobQueue:
       Type: AWS::Batch::JobQueue
       Properties:
@@ -247,7 +242,7 @@ resources:
           - Order: 1
             ComputeEnvironment: !Ref BatchComputeEnvironment
 
-    # Batch Job Definition (already defined)
+    # Batch Job Definition 
     BatchJobDefinition:
       Type: AWS::Batch::JobDefinition
       Properties:
@@ -281,7 +276,6 @@ resources:
               awslogs-group: /aws/batch/${self:service}-${self:provider.stage}
               awslogs-region: ${self:provider.region}
               awslogs-stream-prefix: cognito-restore
-              awslogs-create-group: "true"
 
 outputs:
   EcrRepositoryUri:
