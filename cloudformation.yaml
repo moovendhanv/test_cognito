@@ -59,7 +59,6 @@ Conditions:
   IsS3BucketExistsCondition: !Equals [!Ref IsS3BucketExists, "true"]
 
 Resources:
-
   CodePipelineArtifactBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -282,7 +281,4 @@ Resources:
 Outputs:
   PipelineURL:
     Description: URL to the CodePipeline console
-    Value: !Sub https://console.aws.amazon.com/codepipeline/home?region=${AWS::Region}#/view/${RepoName}-${Environment}-pipeline
-  ECRRepositoryURL:
-    Description: URL to the ECR Repository
-    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${RepoName}-${Environment}
+    Value: !Sub https://console.aws.amazon.com/codepipeline/home?region=${AWS::Region}

@@ -51,7 +51,7 @@ custom:
   s3Bucket: ${opt:bucket, 'cognito-backup-bucket'}
   s3Key: ${opt:key, 'cognito-backup.json'}
   userPoolId: ${opt:userPoolId, 'ap-south-1_OpPrIODGO'}
-  ecrRepositoryUri: ${cf:cognito-restore-codepipeline.EcrRepositoryUri}
+  ecrRepositoryUri: ${env:AWS_ECR_REPOSITORY_URI}
 
 package:
   individually: true

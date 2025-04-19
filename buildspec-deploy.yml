@@ -17,6 +17,8 @@ phases:
       - echo "Installing project dependencies..."
       - npm ci
 
+      - echo AWS_ECR_REPOSITORY_URI
+
   pre_build:
     commands:
       - echo "Logging into AWS ECR..."
