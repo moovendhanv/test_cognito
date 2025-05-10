@@ -2,8 +2,8 @@ version: 0.2
 
 env:
   variables:
-    STAGE: dev              # Default stage (can be overridden in CodeBuild env vars)
-    REGION: ap-south-1      # Default region
+    STAGE: dev           
+    REGION: ap-south-1     
 
 phases:
   install:
@@ -12,8 +12,7 @@ phases:
     commands:
       - echo "Installing Serverless Framework..."
       - npm install -g serverless@3
-
-      # Optional: Install project dependencies if needed
+      
       - echo "Installing project dependencies..."
       - npm ci
 

@@ -14,11 +14,6 @@ fi
 echo "PipelineArtifactBucket=${PipelineArtifactBucket}"
 echo "Tags=${Tags}"
 
-# Check if S3 Bucket exists based on the condition
-if [ "$IsS3BucketExists" == "false" ]; then
-    echo "Error: S3 Bucket does not exist, please create it first."
-    exit $BUCKET_NOT_EXIST
-fi
 
 # Deploy the CloudFormation stack with SAM
 sam deploy -t cloudformation.yaml \
@@ -43,6 +38,6 @@ sam deploy -t cloudformation.yaml \
         ParameterKey=S3Bucket,ParameterValue="${S3Bucket}" \
         ParameterKey=S3Key,ParameterValue="${S3Key}" \
         ParameterKey=UserPoolId,ParameterValue="${UserPoolId}" \
-        ParameterKey=IsS3BucketExists,ParameterValue=true\
-        ParameterKey=ProjectName,ParameterValue=${ProjectName} \
-        ParameterKey=EnvironmentName,ParameterValue=${EnvironmentName}
+        ParameterKey=IsS3BucketExists,ParameterValue=true \
+        ParameterKey=ProjectName,ParameterValue="${ProjectName}" \
+        ParameterKey=EnvironmentName,ParameterValue="${EnvironmentName}"

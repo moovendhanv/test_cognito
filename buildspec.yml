@@ -2,8 +2,8 @@ version: 0.2
 
 env:
   variables:
-    AWS_ECR_REPOSITORY_URI: "698032826194.dkr.ecr.ap-south-1.amazonaws.com/cognito_restore_test-dev:latest"  # Set ECR URI directly here
-    IMAGE_TAG: "latest"  # Or any versioning strategy you follow
+    AWS_ECR_REPOSITORY_URI: "698032826194.dkr.ecr.ap-south-1.amazonaws.com/cognito_restore_test-dev" 
+    IMAGE_TAG: "latest"  
 
 phases:
   install:
