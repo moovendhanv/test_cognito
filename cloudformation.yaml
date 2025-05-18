@@ -129,9 +129,7 @@ Resources:
                   - "s3:GetObjectVersion"
                   - "s3:PutObject"
                   - s3:DeleteObject
-                Resource:
-                  - !Sub arn:aws:s3:::${CodePipelineArtifactBucket}-*
-                  - !Sub arn:aws:s3:::${CodePipelineArtifactBucket}/*
+                Resource: "*"
               - Effect: Allow
                 Action:
                   - "ecr:GetAuthorizationToken"

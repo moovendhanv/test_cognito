@@ -8,6 +8,8 @@ provider:
   stage: ${opt:stage, 'dev'}
   memorySize: 512
   timeout: 30
+  deploymentBucket:
+    name: serverless-artifacts-cognito-restore-service-ap-south-1
   iam:
     role:
       statements:
