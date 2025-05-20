@@ -162,6 +162,12 @@ Resources:
                 Resource:
                   - "arn:aws:s3:::serverless-artifacts-cognito-restore-service-ap-south-1"
                   - "arn:aws:s3:::serverless-artifacts-cognito-restore-service-ap-south-1/*"
+              - Effect: Allow
+                Action:
+                  - iam:GetRole
+                Resource:
+                  - arn:aws:iam::698032826194:role/cognito-restore-service-dev-ap-south-1-lambdaRole
+  
 
   
 
