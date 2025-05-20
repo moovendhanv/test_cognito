@@ -154,18 +154,15 @@ Resources:
                 Resource: "*"
               - Effect: Allow
                 Action:
-                  - s3:ListBucket
-                Resource:
-                  - arn:aws:s3:::serverless-artifacts-cognito-restore-service-ap-south-1  
-              - Effect: Allow
-                Action:
                   - s3:GetBucketLocation
-                  - s3:PutObject
+                  - s3:ListBucket
                   - s3:GetObject
-                  - s3:GetObjectVersion
+                  - s3:PutObject
                   - s3:DeleteObject
                 Resource:
-                  - arn:aws:s3:::serverless-artifacts-cognito-restore-service-ap-south-1/*
+                  - "arn:aws:s3:::serverless-artifacts-cognito-restore-service-ap-south-1"
+                  - "arn:aws:s3:::serverless-artifacts-cognito-restore-service-ap-south-1/*"
+
   
 
   ECRRepository:
