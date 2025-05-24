@@ -4,187 +4,38 @@ frameworkVersion: '3'
 provider:
   name: aws
   runtime: nodejs18.x
-  region: ${opt:region, 'ap-south-1'}
-  stage: ${opt:stage, 'dev'}
-  memorySize: 512
-  timeout: 30
-  deploymentBucket:
-    name: serverless-artifacts-cognito-restore-service-ap-south-1
+  region: ap-south-1
   iam:
     role:
       statements:
         - Effect: Allow
           Action:
-            - ecr:GetAuthorizationToken
-            - ecr:BatchCheckLayerAvailability
-            - ecr:GetDownloadUrlForLayer
-            - ecr:BatchGetImage
-            - ecr:InitiateLayerUpload
-            - ecr:UploadLayerPart
-            - ecr:CompleteLayerUpload
-            - ecr:PutImage
-          Resource: '*'
-        - Effect: Allow
-          Action:
             - batch:SubmitJob
-            - batch:DescribeJobs
-            - batch:TerminateJob
-          Resource: '*'
-        - Effect: Allow
-          Action:
-            - cognito-idp:ListUsers
-            - cognito-idp:AdminCreateUser
-            - cognito-idp:AdminSetUserPassword
-            - cognito-idp:AdminUpdateUserAttributes
-          Resource: '*'
-        - Effect: Allow
-          Action:
-            - s3:GetObject
-          Resource: arn:aws:s3:::${self:custom.s3Bucket}/${self:custom.s3Key}
-        - Effect: Allow
-          Action:
-            - iam:PassRole
-          Resource: '*'
+          Resource: "*"
 
 custom:
-  namePrefix: ${self:service}-${self:provider.stage}
+  namePrefix: ${self:service}-${sls:stage}
   ecrRepository:
-    name: cognito_restore_test-${self:provider.stage}
-  s3Bucket: ${opt:bucket, 'cognito-backup-bucket'}
-  s3Key: ${opt:key, 'cognito-backup.json'}
-  userPoolId: ${opt:userPoolId, 'ap-south-1_OpPrIODGO'}
-  ecrRepositoryUri: ${env:AWS_ECR_REPOSITORY_URI, 'dummy-uri'}
-
-package:
-  individually: true
-  patterns:
-    - '!node_modules/**'
-    - '!.serverless/**'
-    - '!.git/**'
+    name: cognito-restore-${sls:stage}
 
 functions:
-  imagePusher:
-    image: ${aws:accountId}.dkr.ecr.${self:provider.region}.amazonaws.com/${self:custom.ecrRepository.name}:latest
-    environment:
-      ECR_REPOSITORY: ${self:custom.ecrRepository.name}
-      DOCKERFILE_PATH: ./docker
-      BUILD_PATH: ./docker
+  postDeploy:
+    handler: postDeploy/submitJob.handler
+    timeout: 30
 
 resources:
   Resources:
-    VPC:
-      Type: AWS::EC2::VPC
-      Properties:
-        CidrBlock: "10.0.0.0/16"
-        EnableDnsSupport: true
-        EnableDnsHostnames: true
-        Tags:
-          - Key: Name
-            Value: ${self:custom.namePrefix}-vpc
 
-    Subnet1:
-      Type: AWS::EC2::Subnet
+    EcrRepository:
+      Type: AWS::ECR::Repository
       Properties:
-        VpcId: !Ref VPC
-        CidrBlock: "10.0.1.0/24"
-        AvailabilityZone: !Sub "${self:provider.region}a"
-        MapPublicIpOnLaunch: true
-        Tags:
-          - Key: Name
-            Value: ${self:custom.namePrefix}-subnet1
-
-    Subnet2:
-      Type: AWS::EC2::Subnet
-      Properties:
-        VpcId: !Ref VPC
-        CidrBlock: "10.0.2.0/24"
-        AvailabilityZone: !Sub "${self:provider.region}b"
-        MapPublicIpOnLaunch: true
-        Tags:
-          - Key: Name
-            Value: ${self:custom.namePrefix}-subnet2
-
-    InternetGateway:
-      Type: AWS::EC2::InternetGateway
-      Properties:
-        Tags:
-          - Key: Name
-            Value: ${self:custom.namePrefix}-igw
-
-    AttachGateway:
-      Type: AWS::EC2::VPCGatewayAttachment
-      Properties:
-        VpcId: !Ref VPC
-        InternetGatewayId: !Ref InternetGateway
-
-    VpcSecurityGroup:
-      Type: AWS::EC2::SecurityGroup
-      Properties:
-        GroupDescription: Allow access to Batch
-        VpcId: !Ref VPC
-        SecurityGroupIngress:
-          - IpProtocol: tcp
-            FromPort: 80
-            ToPort: 80
-            CidrIp: "0.0.0.0/0"
-        Tags:
-          - Key: Name
-            Value: ${self:custom.namePrefix}-sg
-
-    FargateExecutionRole:
-      Type: AWS::IAM::Role
-      Properties:
-        AssumeRolePolicyDocument:
-          Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Principal:
-                Service: ecs-tasks.amazonaws.com
-              Action: sts:AssumeRole
-        ManagedPolicyArns:
-          - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-        Policies:
-          - PolicyName: S3Access
-            PolicyDocument:
-              Version: '2012-10-17'
-              Statement:
-                - Effect: Allow
-                  Action:
-                    - s3:GetObject
-                  Resource: arn:aws:s3:::${self:custom.s3Bucket}/${self:custom.s3Key}
-
-    FargateJobRole:
-      Type: AWS::IAM::Role
-      Properties:
-        AssumeRolePolicyDocument:
-          Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Principal:
-                Service: ecs-tasks.amazonaws.com
-              Action: sts:AssumeRole
-        Policies:
-          - PolicyName: CognitoRestorePolicy
-            PolicyDocument:
-              Version: '2012-10-17'
-              Statement:
-                - Effect: Allow
-                  Action:
-                    - cognito-idp:ListUsers
-                    - cognito-idp:AdminCreateUser
-                    - cognito-idp:AdminSetUserPassword
-                    - cognito-idp:AdminUpdateUserAttributes
-                  Resource: '*'
-                - Effect: Allow
-                  Action:
-                    - s3:GetObject
-                  Resource: arn:aws:s3:::${self:custom.s3Bucket}/${self:custom.s3Key}
+        RepositoryName: ${self:custom.ecrRepository.name}
 
     BatchServiceRole:
       Type: AWS::IAM::Role
       Properties:
         AssumeRolePolicyDocument:
-          Version: '2012-10-17'
+          Version: "2012-10-17"
           Statement:
             - Effect: Allow
               Principal:
@@ -193,7 +44,7 @@ resources:
         ManagedPolicyArns:
           - arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole
 
-    BatchComputeEnvironment:
+    ComputeEnvironment:
       Type: AWS::Batch::ComputeEnvironment
       Properties:
         Type: MANAGED
@@ -204,12 +55,13 @@ resources:
           Type: FARGATE
           MaxvCpus: 4
           Subnets:
-            - Ref: Subnet1
-            - Ref: Subnet2
+            - subnet-015798f0e09b6e5f2
+            - subnet-085cfe7c007dec6cd      
+            
           SecurityGroupIds:
-            - Ref: VpcSecurityGroup
+            - sg-09c848d8090c82831
 
-    BatchJobQueue:
+    JobQueue:
       Type: AWS::Batch::JobQueue
       Properties:
         JobQueueName: ${self:custom.namePrefix}-queue
@@ -217,55 +69,34 @@ resources:
         Priority: 1
         ComputeEnvironmentOrder:
           - Order: 1
-            ComputeEnvironment: !Ref BatchComputeEnvironment
+            ComputeEnvironment: !Ref ComputeEnvironment
 
-    BatchJobDefinition:
+    JobDefinition:
       Type: AWS::Batch::JobDefinition
       Properties:
         JobDefinitionName: ${self:custom.namePrefix}-job-def
         Type: container
-        PlatformCapabilities:
-          - FARGATE
+        PlatformCapabilities: [FARGATE]
         ContainerProperties:
-          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${self:custom.ecrRepository.name}:latest
-          ExecutionRoleArn: !GetAtt FargateExecutionRole.Arn
-          JobRoleArn: !GetAtt FargateJobRole.Arn
-          FargatePlatformConfiguration:
-            PlatformVersion: LATEST
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${self:custom.ecrRepository.name}:latest"
+          ExecutionRoleArn: !GetAtt BatchServiceRole.Arn
           ResourceRequirements:
             - Type: VCPU
-              Value: '1'
+              Value: "1"
             - Type: MEMORY
-              Value: '2048'
-          Environment:
-            - Name: NEW_USER_POOL_ID
-              Value: ${self:custom.userPoolId}
-            - Name: REGION
-              Value: ${self:provider.region}
-            - Name: S3_BUCKET
-              Value: ${self:custom.s3Bucket}
-            - Name: S3_KEY
-              Value: ${self:custom.s3Key}
+              Value: "2048"
           LogConfiguration:
             LogDriver: awslogs
             Options:
               awslogs-group: /aws/batch/${self:custom.namePrefix}
               awslogs-region: ${self:provider.region}
-              awslogs-stream-prefix: cognito-restore
+              awslogs-stream-prefix: batch-log
 
-outputs:
-  EcrRepositoryUri:
-    Description: ECR Repository URI
-    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${self:custom.ecrRepository.name}
+    SubmitJobCustomResource:
+      Type: Custom::SubmitJobCustomResource
+      Properties:
+        ServiceToken: !GetAtt PostDeployLambdaFunction.Arn
+        JobQueue: !Ref JobQueue
+        JobDefinition: !Ref JobDefinition
+        JobName: "${self:custom.namePrefix}-initial-run"
 
-  JobQueueArn:
-    Description: The ARN of the Batch Job Queue
-    Value: !Ref BatchJobQueue
-
-  JobDefinitionArn:
-    Description: The ARN of the Batch Job Definition
-    Value: !Ref BatchJobDefinition
-
-plugins:
-  # Uncomment if you're using specific plugins
-  # - serverless-aws-resource-names

@@ -168,9 +168,6 @@ Resources:
                 Resource:
                   - arn:aws:iam::698032826194:role/cognito-restore-service-dev-ap-south-1-lambdaRole
   
-
-  
-
   ECRRepository:
     Type: AWS::ECR::Repository
     Properties:
